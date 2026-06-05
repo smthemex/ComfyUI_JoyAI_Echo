@@ -1,0 +1,36 @@
+# =============================================================================
+# Open-source DMD inference - Python dependencies
+#
+# These pins match the conda environment we developed and tested against
+# (CUDA 12.8). For PyTorch family wheels with CUDA, install from the
+# official PyTorch index, e.g.:
+#
+#     pip install --index-url https://download.pytorch.org/whl/cu128 \
+#         torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0
+#
+# Then install the rest of the requirements:
+#
+#     pip install -r requirements.txt
+#
+# If you prefer conda, use `environment.yml` instead.
+# =============================================================================
+
+# --- core deep-learning stack ---
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+triton==3.4.0
+
+# --- HF transformers (Gemma 3 text encoder) ---
+transformers==4.57.6
+safetensors==0.6.2
+
+# --- numerical / utilities ---
+numpy>=2.2,<3
+scipy>=1.13
+einops>=0.8
+Pillow>=10
+tqdm>=4.66
+
+# --- video / audio I/O ---
+av>=14.0
