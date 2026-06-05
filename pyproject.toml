@@ -1,0 +1,16 @@
+[project]
+name = "joyai_echo"
+description = "just 5G VRAM, you can infer 5 min long video,Pushing the Frontier of Long Video Generation Standalone"
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["torch", "torchvision", "torchaudio", "triton", "transformers", "safetensors", "numpy", "scipy", "einops", "Pillow", "tqdm", "av", "diffusers", "gguf", "soundfile"]
+
+[project.urls]
+Repository = "https://github.com/smthemex/ComfyUI_JoyAI_Echo"
+#  Used by Comfy Registry https://registry.comfy.org
+
+[tool.comfy]
+PublisherId = "smthemex"
+DisplayName = "ComfyUI_JoyAI_Echo"
+Icon = ""
+includes = []

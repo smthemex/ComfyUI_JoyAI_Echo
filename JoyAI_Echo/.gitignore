@@ -1,0 +1,72 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+build/
+dist/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+.env
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# --- Claude Code workspace ---
+.claude/
+
+# --- Local user config ---
+configs/*.local.yaml
+
+# --- Inference artifacts ---
+inference_result/
+outputs/
+logs/
+runs/
+tmp/
+*.log
+*.pid
+
+# --- Model weights / large binaries ---
+# Checkpoint files are downloaded separately; do not commit.
+checkpoints/*
+!checkpoints/.gitkeep
+!checkpoints/README.md
+*.safetensors
+*.pt
+*.bin
+*.ckpt
+*.onnx
+
+# --- Generated media ---
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.flac
+*.mp3
+
+# --- Misc ---
+*.tmp
+*.bak
+node_modules/
+
+# other
+condaenv.83aeanp_.requirements.txt
+scripts/merge_checkpoint.py

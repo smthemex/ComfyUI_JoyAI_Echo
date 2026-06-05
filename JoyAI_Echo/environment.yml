@@ -1,0 +1,20 @@
+# =============================================================================
+# Open-source DMD inference - conda environment
+#
+# Create with:
+#     conda env create -f environment.yml
+#     conda activate echo-long
+#
+# This installs Python 3.11 plus ffmpeg from conda-forge, then pulls the
+# Python deps (torch family with CUDA 12.8) from pip via requirements.txt.
+# =============================================================================
+name: echo-long
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - ffmpeg>=6
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - -r requirements.txt

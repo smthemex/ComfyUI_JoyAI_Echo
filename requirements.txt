@@ -1,0 +1,15 @@
+torch
+torchvision
+torchaudio
+triton
+transformers
+safetensors
+numpy
+scipy
+einops
+Pillow
+tqdm
+av
+diffusers
+gguf
+soundfile

@@ -1,0 +1,94 @@
+# =============================================================================
+# Echo-LongVideo Multishot Inference Configuration
+#
+# Used by: python inference.py --config configs/inference.yaml
+# Command-line arguments override values in this file.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+env:
+  venv_path: .venv
+
+# ---------------------------------------------------------------------------
+# Paths (relative paths are resolved from repository root)
+# ---------------------------------------------------------------------------
+paths:
+  checkpoint: checkpoints/test.safetensors
+  gemma_path: checkpoints/gemma-3-12b
+  prompts_dir: prompts
+  prompts_glob: "*.json"
+  output_root: inference_result/outputs
+
+# ---------------------------------------------------------------------------
+# Video / generation settings
+# ---------------------------------------------------------------------------
+video:
+  num_frames: 241
+  height: 736
+  width: 1280
+  fps: 25
+  seed: 12345
+
+# ---------------------------------------------------------------------------
+# Denoising schedule
+# ---------------------------------------------------------------------------
+denoising:
+  steps: 
+      - 1000
+      - 994
+      - 988
+      - 981
+      - 975
+      - 909
+      - 725
+      - 422
+      - 0
+  sigmas:   
+      - 1.0
+      - 0.99375
+      - 0.9875
+      - 0.98125
+      - 0.975
+      - 0.909375
+      - 0.725
+      - 0.421875
+      - 0.0
+
+# ---------------------------------------------------------------------------
+# Memory bank (paired audio-video memory)
+# ---------------------------------------------------------------------------
+memory:
+  max_size: 7
+  num_fix_frames: 3
+  downscale_factor: 1
+  position_mode: reference
+  lora_strength: 1.0
+  lora_generator: true
+  lora_path: ""
+  save_mode: random_every_shot_frame
+  frame_selection_mode: center
+  clip_num_frames: 9
+
+# ---------------------------------------------------------------------------
+# Audio memory
+# ---------------------------------------------------------------------------
+audio_memory:
+  enable: true
+  window_size: 96
+  window_selection_mode: max_response
+  sample_rate: 16000
+  mel_bins: 128
+  mel_hop_length: 160
+  n_fft: 1024
+  downsample_factor: 4
+  is_causal: true
+
+# ---------------------------------------------------------------------------
+# Inference runtime
+# ---------------------------------------------------------------------------
+inference:
+  device: cuda
+  dtype: bfloat16
+  v2a_grad_scale: 2.0
