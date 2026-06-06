@@ -42,7 +42,7 @@ pip install -r requirements.txt
 4 Example
 ----
 
-![](https://github.com/smthemex/ComfyUI_JoyAI_Echo/tree/main/example_workflows/example.png)
+![](https://github.com/smthemex/ComfyUI_JoyAI_Echo/blob/main/example_workflows/example.png)
 
 5 Citation
 ----
