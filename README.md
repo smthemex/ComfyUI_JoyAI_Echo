@@ -3,7 +3,7 @@
 
 Update
 ----
-* 2023.6.6 新增TE的safetesor 支持，大显存可以设置preftch 为0 或者开启streaming ；目前只支持t2v，i2v需要官方的1.5版模型，在训练了，等等
+* 2023.6.6 新增TE的safetesor 支持，大显存可以设置preftch 为0 或者开启streaming ；目前只支持t2v，i2v需要官方的1.5版模型，在训练了，等等,官方推荐最佳质量：1280×736 分辨率 + 241 帧，25fps
 * 复现官方代码， 3050 6G即可 跑5分钟 848*512 故事板长视频，无任何字幕，拼接自然
 * just need 6G Vram to infer 5 minutes long video ，no word
 
