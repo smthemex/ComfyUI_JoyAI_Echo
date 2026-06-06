@@ -200,6 +200,7 @@ class LTXModel(torch.nn.Module):
         self.timestep_scale_multiplier = timestep_scale_multiplier
         self.positional_embedding_theta = positional_embedding_theta
         self.model_type = model_type
+       
         cross_pe_max_pos = None
         if model_type.is_video_enabled():
             if positional_embedding_max_pos is None:
@@ -552,7 +553,7 @@ class LTXModel(torch.nn.Module):
             raise ValueError("Video is not enabled for this model")
         if not self.model_type.is_audio_enabled() and audio is not None:
             raise ValueError("Audio is not enabled for this model")
-        print(gpu_manager)
+        
         video_args = self.video_args_preprocessor.prepare(video, audio) if video is not None else None
         audio_args = self.audio_args_preprocessor.prepare(audio, video) if audio is not None else None
         # Process transformer blocks

@@ -44,15 +44,23 @@ class SafetensorsStateDictLoader(StateDictLoader):
         size = 0
         dtype = set()
         device = device or torch.device("cpu")
+        vae_distill=False
         model_paths = path if isinstance(path, list) else [path]
         for shard_path in model_paths:
             with safetensors.safe_open(shard_path, framework="pt", device=str(device)) as f:
                 safetensor_keys = f.keys()
                 for name in safetensor_keys:
+                    if name.startswith("decoder.") or name.startswith("encoder.") or name.startswith("per_channel_statistics."):
+                        origin_name=name
+                        vae_distill=True
+                        name="vae."+name
                     expected_name = name if sd_ops is None else sd_ops.apply_to_key(name)
                     if expected_name is None:
                         continue
-                    value = f.get_tensor(name).to(device=device, non_blocking=True, copy=False)
+                    if vae_distill:
+                        value = f.get_tensor(origin_name).to(device=device, non_blocking=True, copy=False)  
+                    else:      
+                        value = f.get_tensor(name).to(device=device, non_blocking=True, copy=False)
                     key_value_pairs = ((expected_name, value),)
                     if sd_ops is not None:
                         key_value_pairs = sd_ops.apply_to_key_value(expected_name, value)
@@ -74,14 +82,20 @@ class SafetensorsModelStateDictLoader(StateDictLoader):
     def __init__(self, weight_loader: SafetensorsStateDictLoader | None = None):
         self.weight_loader = weight_loader if weight_loader is not None else SafetensorsStateDictLoader()
 
-    def metadata(self, path: str,laod_model) -> dict:
-        if laod_model in ["spatial"]:
+    def metadata(self, path: str,load_model) -> dict:
+        if load_model in ["spatial"]:
             with safetensors.safe_open(path, framework="pt") as f:
                 md = json.loads(f.metadata()["config"])       
             return md
+        elif load_model == "origin":
+            with safetensors.safe_open(path, framework="pt") as f:
+                meta = f.metadata()
+                if meta is None or "config" not in meta:
+                    return {}
+                return json.loads(meta["config"])
         else:
-            md = json.loads(ORIGINAL_CONFIG_JSON)
-        return md
+            return json.loads(ORIGINAL_CONFIG_JSON)
+        
 
 
 

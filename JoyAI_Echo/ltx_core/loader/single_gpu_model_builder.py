@@ -80,6 +80,15 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
                 model = module_op.mutator(model)
         return model
     
+    def load_sd_(
+        self, paths: list[str], registry: Registry, device: torch.device | None, sd_ops: SDOps | None = None
+    ) -> StateDict:
+        state_dict = registry.get(paths, sd_ops)
+        if state_dict is None:
+            state_dict = self.model_loader.load(paths, sd_ops=sd_ops, device=device)
+            registry.add(paths, sd_ops=sd_ops, state_dict=state_dict)
+        return state_dict
+
   
 
     def load_sd(
@@ -87,11 +96,11 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
     ) -> StateDict:
         if gguf_dit:
             if  isinstance(paths, str) and paths.endswith(".safetensors"):
-                if self.load_model == "vae" or self.load_model == "audio_vae":
-                    from safetensors.torch import load_file
-                    state_dict = load_file(paths)
-                else:
-                    state_dict = self.model_loader.load(paths, sd_ops=sd_ops, device=device)
+                # if self.load_model == "vae" : :
+                #     from safetensors.torch import load_file
+                #     state_dict = load_file(paths)
+                # else:
+                state_dict = self.model_loader.load(paths, sd_ops=sd_ops, device=device)
             else:
                 state_dict = load_gguf_checkpoint(paths[0], sd_ops=sd_ops)
         else:
@@ -129,16 +138,23 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
                 model_state_dict=load_gguf_checkpoint_gemma(first_shard_path) 
             else:
                 model_state_dict = self.load_sd(first_shard_path, sd_ops=self.model_sd_ops, registry=self.registry, device=device, gguf_dit=gguf_dit)
-            if self.load_model == "vae" :
-                if encoded and  self.load_model == "vae":
-                    sd = {key.replace("encoder.",""): value for key, value in model_state_dict.items() if  not key.startswith("decoder.") }
-                elif not encoded and  self.load_model == "vae":
-                    sd = {key.replace("decoder.",""): value for key, value in model_state_dict.items() if  not key.startswith("encoder.") }
-                if dtype is not None  and not gguf_dit :
-                    sd = {key: value.to(dtype=dtype) for key, value in model_state_dict.items()}
-                del model_state_dict
-                gc.collect()
-            elif self.load_model == "clip"and first_shard_path.endswith(".gguf") :
+            # if self.load_model == "vae" : 
+            #     if encoded :
+            #         sd = {key.replace("vae.",""): value for key, value in model_state_dict.items() }
+            #         sd = {key.replace("audio_vae.",""): value for key, value in sd.items() }
+            #         sd = {key.replace("encoder.",""): value for key, value in sd.items() if  not key.startswith("decoder.") }
+            #         match_state_dict(meta_model, sd,show_num=10)
+            #     elif not encoded :
+            #         sd = {key.replace("vae.",""): value for key, value in model_state_dict.items() }
+            #         sd = {key.replace("audio_vae.",""): value for key, value in sd.items() }
+            #         sd = {key.replace("decoder.",""): value for key, value in sd.items() if  not key.startswith("encoder.") }
+            #         match_state_dict(meta_model, sd,show_num=10)
+            #     if dtype is not None  and not gguf_dit :
+            #         sd = {key: value.to(dtype=dtype) for key, value in model_state_dict.items()}
+            #     del model_state_dict
+            #     gc.collect()
+
+            if self.load_model == "clip"and first_shard_path.endswith(".gguf") :
                 def adjust_key_name(key):
                     from packaging import version
                     import transformers
@@ -208,10 +224,7 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
                 gc.collect()
                 if dtype is not None  and not gguf_dit :
                     sd = {key: value.to(dtype=dtype) for key, value in sd.items()}
-            # 打印 meta_model 和 state_dict 的键以进行比较
-            
-           
-            #match_state_dict(meta_model, sd)
+            match_state_dict(meta_model, sd)
             meta_model.load_state_dict(sd, strict=False, assign=True)
             del sd
             gc.collect()
@@ -270,6 +283,37 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
             gc.collect()
         return self._return_model(meta_model, device)
     
+    def build_(self, device: torch.device | None = None, dtype: torch.dtype | None = None) -> ModelType:
+        device = torch.device("cuda") if device is None else device
+        config = self.model_config()
+        meta_model = self.meta_model(config, self.module_ops)
+        model_paths = list(self.model_path) if isinstance(self.model_path, tuple) else [self.model_path]
+        model_state_dict = self.load_sd_(model_paths, sd_ops=self.model_sd_ops, registry=self.registry, device=device)
+
+        lora_strengths = [lora.strength for lora in self.loras]
+        if not lora_strengths or (min(lora_strengths) == 0 and max(lora_strengths) == 0):
+            sd = model_state_dict.sd
+            if dtype is not None:
+                sd = {key: value.to(dtype=dtype) for key, value in model_state_dict.sd.items()}
+            meta_model.load_state_dict(sd, strict=False, assign=True)
+            return self._return_model(meta_model, device)
+
+        lora_state_dicts = [
+            self.load_sd_([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=self.lora_load_device)
+            for lora in self.loras
+        ]
+        lora_sd_and_strengths = [
+            LoraStateDictWithStrength(sd, strength)
+            for sd, strength in zip(lora_state_dicts, lora_strengths, strict=True)
+        ]
+        final_sd = apply_loras(
+            model_sd=model_state_dict,
+            lora_sd_and_strengths=lora_sd_and_strengths,
+            dtype=dtype,
+            destination_sd=model_state_dict if isinstance(self.registry, DummyRegistry) else None,
+        )
+        meta_model.load_state_dict(final_sd.sd, strict=False, assign=True)
+        return self._return_model(meta_model, device)
 
      
     def set_gguf2meta_model(self,meta_model,model_state_dict,dtype,device,lora_sd_and_strengths=None):
@@ -442,4 +486,4 @@ def match_state_dict(meta_model, sd,show_num=10):
             print(f"  - {key}")
     
     # 如果需要，也可以打印部分匹配的键
-    print(f"Sample matching keys: {list(matching_keys)[:5]}")
+    #print(f"Sample matching keys: {list(matching_keys)[:5]}")

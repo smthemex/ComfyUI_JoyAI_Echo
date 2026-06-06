@@ -1,7 +1,7 @@
 from diffusers.quantizers.gguf.utils import dequantize_gguf_tensor
 
 from contextlib import contextmanager
-from .layer_streaming import SimpleLayerStreamingWrapper,SimpleLayerStreamingWrapper_
+from .layer_streaming import SimpleLayerStreamingWrapper,LayerStreamingWrapper
 from collections.abc import Iterator
 from typing import TypeVar
 import gc
@@ -21,18 +21,16 @@ def cleanup_memory() -> None:
 # LayerStreamingWrapper from https://github.com/Lightricks/LTX-2
 
 @contextmanager
-def _streaming_model(
+def streaming_single_model(
     model: _M,
     layers_attr: str,
     target_device: torch.device,
-    prefetch_count: int,
 ) -> Iterator[_M]:
     """Wrap *model* with :class:`LayerStreamingWrapper`, yield it, then tear down."""
     wrapped = SimpleLayerStreamingWrapper(
         model,
         layers_attr=layers_attr,
         target_device=target_device,
-        active_count=prefetch_count,
     )
     try:
         yield wrapped  # type: ignore[misc]
@@ -51,18 +49,18 @@ def _streaming_model(
             print("Host empty cache cleanup failed; ignoring.", exc_info=True)
 
 @contextmanager
-def _streaming_model_(
+def streaming_prefetch_model(
     model: _M,
     layers_attr: str,
     target_device: torch.device,
     prefetch_count: int,
 ) -> Iterator[_M]:
     """Wrap *model* with :class:`LayerStreamingWrapper`, yield it, then tear down."""
-    wrapped = SimpleLayerStreamingWrapper_(
+    wrapped = LayerStreamingWrapper(
         model,
         layers_attr=layers_attr,
         target_device=target_device,
-        active_count=prefetch_count,
+        prefetch_count=prefetch_count,
     )
     try:
         yield wrapped  # type: ignore[misc]
