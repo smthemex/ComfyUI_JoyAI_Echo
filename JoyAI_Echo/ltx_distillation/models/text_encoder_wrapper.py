@@ -90,7 +90,35 @@ class GemmaTextEncoderWrapper(nn.Module):
         video_contexts = []
         audio_contexts = []
         attention_masks = []
-        with self._model_ctx(self.text_encoder, self.prefetch_count) as self.text_encoder:
+        if self.prefetch_count is not None:
+            with self._model_ctx(self.text_encoder, self.prefetch_count) as self.text_encoder:
+                for prompt in text_prompts:
+                    # 1) Run Gemma LLM to get raw hidden states + attention mask
+                    hidden_states, attn_mask = self.text_encoder.encode(prompt, padding_side=padding_side)
+                    # 2) Process hidden states to obtain final embeddings
+                    output = self.embeddings_processor.process_hidden_states(
+                        hidden_states, attn_mask, padding_side=padding_side
+                    )
+
+                    video_contexts.append(output.video_encoding)
+                    audio_contexts.append(output.audio_encoding)
+                    attention_masks.append(output.attention_mask)
+
+                # Stack batch
+                video_context = torch.cat(video_contexts, dim=0) if len(video_contexts) > 0 else None
+                # Handle optional audio connector (may be None depending on config)
+                if any(ac is None for ac in audio_contexts):
+                    audio_context = None
+                else:
+                    audio_context = torch.cat(audio_contexts, dim=0)
+                attention_mask = torch.cat(attention_masks, dim=0) if len(attention_masks) > 0 else None
+
+                return {
+                    "video_context": video_context,
+                    "audio_context": audio_context,
+                    "attention_mask": attention_mask,
+                }
+        else: # 无法用with包装，暂时改成判断
             for prompt in text_prompts:
                 # 1) Run Gemma LLM to get raw hidden states + attention mask
                 hidden_states, attn_mask = self.text_encoder.encode(prompt, padding_side=padding_side)
