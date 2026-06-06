@@ -68,7 +68,7 @@ class VideoVAEWrapper(nn.Module):
         return self.encoder(video)
 
     @torch.no_grad()
-    def decode(self, latent: torch.Tensor) -> torch.Tensor:
+    def decode(self, latent: torch.Tensor,tiling_config=None) -> torch.Tensor:
         """
         Decode latent to pixel space.
 
@@ -91,11 +91,12 @@ class VideoVAEWrapper(nn.Module):
         # Keep latent dtype/device consistent with decoder weights.
         dec_device, dec_dtype = _module_device_dtype(self.decoder)
         latent = latent.to(device=dec_device, dtype=dec_dtype)
-
+        if tiling_config is not None:
+            return self.decoder.tiled_decode(latent,tiling_config)
         return self.decoder(latent)
 
     @torch.no_grad()
-    def decode_to_pixel(self, latent: torch.Tensor) -> torch.Tensor:
+    def decode_to_pixel(self, latent: torch.Tensor,tiling_config=None) -> torch.Tensor:
         """
         Decode latent to pixel video for visualization.
 
@@ -105,7 +106,7 @@ class VideoVAEWrapper(nn.Module):
         Returns:
             Video frames suitable for logging (normalized to [0, 1])
         """
-        video = self.decode(latent)
+        video = self.decode(latent,tiling_config)
         # Normalize from [-1, 1] to [0, 1]
         video = (video + 1) / 2
         video = video.clamp(0, 1)
@@ -296,7 +297,7 @@ def create_vae_wrappers(
         loras=[],
         quantization=None,
         gguf_dit=True,
-        load_mode="vae",
+        load_model="vae",
         clip_path=None,
     )
     audio_model_ledger = ModelLedger(
@@ -307,7 +308,7 @@ def create_vae_wrappers(
         loras=[],
         quantization=None,
         gguf_dit=True,
-        load_mode="audio",
+        load_model="audio",
         clip_path=None,
     )
 
@@ -342,4 +343,74 @@ def create_vae_wrappers(
         dtype=dtype,
     )
     del model_ledger, audio_model_ledger
+    return video_vae, audio_vae
+
+def create_vae_wrappers_(
+    checkpoint_path,
+    device: torch.device,
+    dtype: torch.dtype = torch.bfloat16,
+    with_video_encoder: bool = False,
+    with_audio_encoder: bool = False,
+    decoder_device: torch.device | None = None,
+    registry: Registry | None = None,
+) -> tuple[VideoVAEWrapper, AudioVAEWrapper]:
+    """
+    Factory function to create VAE wrappers from checkpoint.
+
+    Args:
+        checkpoint_path: Path to LTX-2 checkpoint
+        device: Target device
+        dtype: Model dtype
+        decoder_device: Device for video/audio decoders and vocoder. Defaults to
+            ``device``; pass ``cpu`` during training init to avoid holding decode
+            modules on every rank when only encoders are needed.
+
+    Returns:
+        Tuple of (VideoVAEWrapper, AudioVAEWrapper)
+    """
+    from ...ltx_pipelines.utils.model_ledger import ModelLedger
+
+    if decoder_device is None:
+        decoder_device = device
+
+    # Load to CPU first to avoid safetensors device issues
+    ledger = ModelLedger(
+        dtype=dtype,
+        device=torch.device("cpu"),
+        checkpoint_path=checkpoint_path,
+        registry=registry,
+        gguf_dit=False,
+        load_model="origin",
+    )
+
+    video_encoder = ledger.video_encoder() if with_video_encoder else None
+    video_decoder = ledger.video_decoder()
+    audio_encoder = ledger.audio_encoder() if with_audio_encoder else None
+    audio_decoder = ledger.audio_decoder()
+    vocoder = ledger.vocoder()
+
+    # Move to target device
+    if video_encoder is not None:
+        video_encoder = video_encoder.to(device=device, dtype=dtype)
+    video_decoder = video_decoder.to(device=decoder_device, dtype=dtype)
+    if audio_encoder is not None:
+        audio_encoder = audio_encoder.to(device=device, dtype=torch.float32)
+    audio_decoder = audio_decoder.to(device=decoder_device, dtype=dtype)
+    vocoder = vocoder.to(device=decoder_device, dtype=dtype)
+
+    video_vae = VideoVAEWrapper(
+        encoder=video_encoder,
+        decoder=video_decoder,
+        device=device,
+        dtype=dtype,
+    )
+
+    audio_vae = AudioVAEWrapper(
+        encoder=audio_encoder,
+        decoder=audio_decoder,
+        vocoder=vocoder,
+        device=device,
+        dtype=dtype,
+    )
+    
     return video_vae, audio_vae

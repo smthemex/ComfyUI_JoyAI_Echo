@@ -11,7 +11,7 @@ import torch
 import torchaudio
 from torchvision.io import write_video
 from torchvision.transforms import functional as TVF
-
+from ..ltx_core.model.video_vae import TilingConfig
 from .inference.memory_multishot import (
     audio_waveform_stats,
     normalize_audio_waveform_for_media,
@@ -79,6 +79,8 @@ def encode_memory_frames_batch(
     target_w: int,
     device: torch.device,
     dtype: torch.dtype,
+    
+
 ) -> torch.Tensor:
     if getattr(video_vae, "encoder", None) is None:
         raise RuntimeError("video VAE encoder is not initialized for memory encoding")
@@ -107,8 +109,12 @@ def encode_memory_frames_batch(
 
 
 @torch.no_grad()
-def decode_benchmark_sample(video_vae, audio_vae, video_latent, audio_latent):
-    video_pixel = video_vae.decode_to_pixel(video_latent)
+def decode_benchmark_sample(video_vae, audio_vae, video_latent, audio_latent,enable_tiles,):
+    tiling_config=TilingConfig.default() if enable_tiles else None
+    if enable_tiles:
+        video_pixel = video_vae.decode_to_pixel(video_latent,tiling_config)
+    else:
+        video_pixel = video_vae.decode_to_pixel(video_latent)
     audio_waveform = audio_vae.decode_to_waveform(audio_latent) if audio_latent is not None else None
 
     video_uint8 = video_pixel[0]
@@ -153,10 +159,20 @@ def write_benchmark_media(
         write_video(str(output_path), video_uint8, fps=fps)
         if audio_waveform is not None:
             try:
-                torchaudio.save(str(output_path.with_suffix(".wav")), audio_waveform, audio_sr)
-                wrote_sidecar_wav = True
+                import soundfile as sf
+                audio_np = audio_waveform.cpu().numpy()
+                if audio_np.ndim == 2:
+                    audio_np = audio_np.T  # [C, T] -> [T, C]
+                elif audio_np.ndim == 1:
+                    pass # 单声道直接保存
+                sf.write(str(output_path.with_suffix(".wav")), audio_np, int(self.audio_sample_rate))
             except Exception as exc:
-                print(f"[warn] torchaudio.save failed for {output_path}: {exc}; audio_stats={stats}", flush=True)
+                print(f"[warn] sf.write failed for {output_path}: {exc}; audio_stats={stats}", flush=True)
+                try:
+                    torchaudio.save(str(output_path.with_suffix(".wav")), audio_waveform, audio_sr)
+                    wrote_sidecar_wav = True
+                except Exception as exc:
+                    print(f"[warn] torchaudio.save failed for {output_path}: {exc}; audio_stats={stats}", flush=True)
 
     return {
         "wrote_audio_in_mp4": wrote_with_audio,

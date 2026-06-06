@@ -1,0 +1,499 @@
+{
+  "id": "d706cd6b-b61c-444e-8f49-2971f3b77190",
+  "revision": 0,
+  "last_node_id": 19,
+  "last_link_id": 22,
+  "nodes": [
+    {
+      "id": 9,
+      "type": "SaveVideo",
+      "pos": [
+        22495.56434575585,
+        -571.1847324549719
+      ],
+      "size": [
+        375.23099935119535,
+        348.15399956746353
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 10
+        }
+      ],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "PreviewAny",
+      "pos": [
+        21748.495732265565,
+        -364.0660095658154
+      ],
+      "size": [
+        291.66326551122984,
+        145.22598556484604
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 13,
+      "type": "Note",
+      "pos": [
+        21440.246935807103,
+        -365.8927610579837
+      ],
+      "size": [
+        284.13561282761293,
+        154.53596434855024
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "if high vram set prefetech-count =0\n大显存设置 prefetech-count 为0\n\nif Vram =24G ，enable enable streaming  and add prefetech-count >1\n普通显存比如4090 开启enable streaming 加大prefetech-count 数值\n\nif lower Vram set enable streaming off\n小显存关闭enable streaming ，prefetech-count 失效"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 18,
+      "type": "Note",
+      "pos": [
+        21754.531131365533,
+        -156.20669623813183
+      ],
+      "size": [
+        329.2079829391223,
+        88
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "内存不够大时，可以关闭 sampler，只运行text encoder ，完成后，关闭text encdoer 再运行sampleer，避免内存OOM\n会自动读取推理的pt文件，你可以复制一份，方便抽卡，"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 17,
+      "type": "Note",
+      "pos": [
+        21134.956641592446,
+        -553.2225582889238
+      ],
+      "size": [
+        282.2286863958834,
+        88
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "支持json和提示词输入\n使用提示词输入时， 单行就是一个片段，注意使用换行符"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 14,
+      "type": "Note",
+      "pos": [
+        22122.245042269966,
+        -160.33982056796523
+      ],
+      "size": [
+        283.2688826429985,
+        191.80732634188314
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "if high vram set prefetech-count =0\n大显存设置 prefetech-count 为0\n\nif Vram =24G ，enable enable streaming  and add prefetech-count >1\n普通显存比如4090 开启enable streaming 加大prefetech-count 数值\n\nif lower Vram set enable streaming off\n小显存关闭enable streaming ，prefetech-count 失效"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 16,
+      "type": "Note",
+      "pos": [
+        22426.11045959312,
+        -160.26575084039914
+      ],
+      "size": [
+        311.87236084798496,
+        88
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "num frames 是单个片段的时长，最长设置到20秒，多了ltx的短板会崩画面\n\nkeep num frames < 242, it a single shot's frame"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 10,
+      "type": "CreateVideo",
+      "pos": [
+        22501.868367045983,
+        -741.3880995663578
+      ],
+      "size": [
+        270,
+        78
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 20
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 21
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CreateVideo"
+      },
+      "widgets_values": [
+        24
+      ]
+    },
+    {
+      "id": 19,
+      "type": "JoyAI_Echo_SM_KSampler",
+      "pos": [
+        22137.812006476048,
+        -511.39531794426347
+      ],
+      "size": [
+        274.9341796875,
+        270
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 19
+        },
+        {
+          "name": "te_cond",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 22
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            20
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_KSampler"
+      },
+      "widgets_values": [
+        768,
+        512,
+        12345,
+        "fixed",
+        121,
+        24,
+        1,
+        false,
+        false
+      ]
+    },
+    {
+      "id": 1,
+      "type": "JoyAI_Echo_SM_Clip",
+      "pos": [
+        21612.34748694546,
+        -766.2907333876013
+      ],
+      "size": [
+        400.3746543484958,
+        130
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Clip"
+      },
+      "widgets_values": [
+        "gemma3.safetensors",
+        "none",
+        "JoyAI-Echo-release_connector.safetensors",
+        "cuda"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "JoyAI_Echo_SM_Encoder",
+      "pos": [
+        21437.185717078566,
+        -592.5600978586158
+      ],
+      "size": [
+        626.2437776974439,
+        165.21970601318856
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "te_cond",
+          "type": "CONDITIONING",
+          "links": [
+            18,
+            22
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Encoder"
+      },
+      "widgets_values": [
+        1,
+        "",
+        "",
+        "F:\\ComfyUI311\\ComfyUI\\custom_nodes\\ComfyUI_JoyAI_Echo\\JoyAI_Echo\\prompts\\test_002.json"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "JoyAI_Echo_SM_Model",
+      "pos": [
+        22110.46233924075,
+        -766.7602655442823
+      ],
+      "size": [
+        365.2870386489449,
+        146.3230967340288
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Model"
+      },
+      "widgets_values": [
+        "JoyAI-Echo-release-transformer-bf16.safetensors",
+        "none",
+        "ltx-2.3-22b-distilled_video_vae.safetensors",
+        "ltx-2.3-22b-distilled_audio_vae.safetensors"
+      ]
+    }
+  ],
+  "links": [
+    [
+      2,
+      1,
+      0,
+      3,
+      0,
+      "CLIP"
+    ],
+    [
+      10,
+      10,
+      0,
+      9,
+      0,
+      "VIDEO"
+    ],
+    [
+      18,
+      3,
+      0,
+      12,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      19,
+      4,
+      0,
+      19,
+      0,
+      "MODEL"
+    ],
+    [
+      20,
+      19,
+      0,
+      10,
+      0,
+      "IMAGE"
+    ],
+    [
+      21,
+      19,
+      1,
+      10,
+      1,
+      "AUDIO"
+    ],
+    [
+      22,
+      3,
+      0,
+      19,
+      1,
+      "CONDITIONING"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "stage 1 ：text encoder",
+      "bounding": [
+        21413.883069354153,
+        -833.6903427911261,
+        669.4246798791319,
+        635.3220696838207
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "stage2 ：sampler",
+      "bounding": [
+        22100.46233924075,
+        -836.7602655442823,
+        780.3330058662978,
+        636.731212853737
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8411713695738174,
+      "offset": [
+        -20943.91747829299,
+        927.483970820305
+      ]
+    },
+    "frontendVersion": "1.43.18",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

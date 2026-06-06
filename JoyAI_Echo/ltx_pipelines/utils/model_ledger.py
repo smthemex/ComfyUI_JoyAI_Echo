@@ -104,8 +104,9 @@ class ModelLedger:
         registry: Registry | None = None,
         quantization: QuantizationPolicy | None = None,
         gguf_dit: bool = False,
-        load_mode: str = "dit",
+        load_model: str = "dit",
         clip_path="",
+        origin_vae=True
     ):
         self.dtype = dtype
         self.device = device
@@ -116,26 +117,29 @@ class ModelLedger:
         self.registry = registry or DummyRegistry()
         self.quantization = quantization
         self.gguf_dit = gguf_dit
-        self.load_mode = load_mode
+        self.load_model = load_model
         self.clip_path = clip_path
-        if self.load_mode == "clip":
+        self.origin_vae = origin_vae
+        if self.load_model == "clip":
             self.build_model_builders_clip()
             self.build_model_builders_embeddings()
-        elif self.load_mode == "vae":
+        elif self.load_model == "vae":
             self.build_model_builders_vae()
-        elif self.load_mode == "audio":
+        elif self.load_model == "audio":
             self.build_model_builders_audio()
-        elif self.load_mode == "spatial":
+        elif self.load_model == "spatial":
             self.build_model_builders_spatial()
+        elif self.load_model == "dit":
+            self.build_model_builders()   
         else:
-            self.build_model_builders()    
+            self.build_model_builders_origin()    
 
     def build_model_builders_spatial(self):       
         self.upsampler_builder = Builder(
             model_path=self.spatial_upsampler_path,
             model_class_configurator=LatentUpsamplerConfigurator,
             registry=self.registry,
-            load_model= self.load_mode,
+            load_model= self.load_model,
         )
 
     def build_model_builders_clip(self):
@@ -146,7 +150,7 @@ class ModelLedger:
             model_sd_ops=GEMMA_LLM_KEY_OPS,
             registry=self.registry,
             module_ops=(GEMMA_MODEL_OPS, *module_ops),
-            load_model= self.load_mode,
+            load_model= self.load_model,
          )
     def build_model_builders_embeddings(self):
         # Embeddings processor only needs the LTX checkpoint (no Gemma weights)
@@ -155,7 +159,7 @@ class ModelLedger:
             model_class_configurator=EmbeddingsProcessorConfigurator,
             model_sd_ops=EMBEDDINGS_PROCESSOR_KEY_OPS,
             registry=self.registry,
-            load_model= self.load_mode,
+            load_model= self.load_model,
         )
 
     def build_model_builders_audio(self):
@@ -165,21 +169,21 @@ class ModelLedger:
             model_class_configurator=AudioDecoderConfigurator,
             model_sd_ops=AUDIO_VAE_DECODER_COMFY_KEYS_FILTER,
             registry=self.registry,
-            load_model= self.load_mode,
+            load_model= self.load_model,
         )
         self.audio_encoder_builder = Builder[AudioEncoder](
                 model_path=self.checkpoint_path,
                 model_class_configurator=AudioEncoderConfigurator,
                 model_sd_ops=AUDIO_VAE_ENCODER_COMFY_KEYS_FILTER,
                 registry=self.registry,
-                load_model= self.load_mode,
+                load_model= self.load_model,
             )
         self.vocoder_builder = Builder(
             model_path=self.checkpoint_path,
             model_class_configurator=VocoderConfigurator,
             model_sd_ops=VOCODER_COMFY_KEYS_FILTER,
             registry=self.registry,
-            load_model= self.load_mode,
+            load_model= self.load_model,
         )
   
     def build_model_builders_vae(self):
@@ -188,7 +192,7 @@ class ModelLedger:
             model_class_configurator=VideoDecoderConfigurator,
             model_sd_ops=VAE_DECODER_COMFY_KEYS_FILTER,
             registry=self.registry,
-            load_model= self.load_mode,
+            load_model= self.load_model,
             )
 
         self.vae_encoder_builder = Builder(
@@ -196,10 +200,10 @@ class ModelLedger:
             model_class_configurator=VideoEncoderConfigurator,
             model_sd_ops=VAE_ENCODER_COMFY_KEYS_FILTER,
             registry=self.registry,
-            load_model= self.load_mode,
+            load_model= self.load_model,
         )
 
-    def build_model_builders(self) -> None:
+    def build_model_builders(self):
         if self.checkpoint_path is not None:
             self.transformer_builder = Builder(
                 model_path=self.checkpoint_path,
@@ -207,50 +211,68 @@ class ModelLedger:
                 model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP,
                 loras=tuple(self.loras),
                 registry=self.registry,
+                load_model= self.load_model,
+            )
+    def build_model_builders_origin(self):
+        if self.checkpoint_path is not None:
+            
+            self.transformer_builder = Builder(
+                model_path=self.checkpoint_path,
+                model_class_configurator=LTXModelConfigurator,
+                model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP,
+                loras=tuple(self.loras),
+                registry=self.registry,
+                load_model= self.load_model,
+            )
+         
+            self.vae_decoder_builder = Builder(
+                model_path=self.checkpoint_path,
+                model_class_configurator=VideoDecoderConfigurator,
+                model_sd_ops=VAE_DECODER_COMFY_KEYS_FILTER,
+                registry=self.registry,
+                load_model= self.load_model,
             )
 
-        #     self.vae_decoder_builder = Builder(
-        #         model_path=self.checkpoint_path,
-        #         model_class_configurator=VideoDecoderConfigurator,
-        #         model_sd_ops=VAE_DECODER_COMFY_KEYS_FILTER,
-        #         registry=self.registry,
-        #     )
+            self.vae_encoder_builder = Builder(
+                model_path=self.checkpoint_path,
+                model_class_configurator=VideoEncoderConfigurator,
+                model_sd_ops=VAE_ENCODER_COMFY_KEYS_FILTER,
+                registry=self.registry,
+                load_model= self.load_model,
+            )
 
-        #     self.vae_encoder_builder = Builder(
-        #         model_path=self.checkpoint_path,
-        #         model_class_configurator=VideoEncoderConfigurator,
-        #         model_sd_ops=VAE_ENCODER_COMFY_KEYS_FILTER,
-        #         registry=self.registry,
-        #     )
+            self.audio_encoder_builder = Builder[AudioEncoder](
+                model_path=self.checkpoint_path,
+                model_class_configurator=AudioEncoderConfigurator,
+                model_sd_ops=AUDIO_VAE_ENCODER_COMFY_KEYS_FILTER,
+                registry=self.registry,
+                load_model= self.load_model,
+            )
 
-        #     self.audio_encoder_builder = Builder[AudioEncoder](
-        #         model_path=self.checkpoint_path,
-        #         model_class_configurator=AudioEncoderConfigurator,
-        #         model_sd_ops=AUDIO_VAE_ENCODER_COMFY_KEYS_FILTER,
-        #         registry=self.registry,
-        #     )
+            self.audio_decoder_builder = Builder(
+                model_path=self.checkpoint_path,
+                model_class_configurator=AudioDecoderConfigurator,
+                model_sd_ops=AUDIO_VAE_DECODER_COMFY_KEYS_FILTER,
+                registry=self.registry,
+                load_model= self.load_model,
+            )
 
-        #     self.audio_decoder_builder = Builder(
-        #         model_path=self.checkpoint_path,
-        #         model_class_configurator=AudioDecoderConfigurator,
-        #         model_sd_ops=AUDIO_VAE_DECODER_COMFY_KEYS_FILTER,
-        #         registry=self.registry,
-        #     )
-
-        #     self.vocoder_builder = Builder(
-        #         model_path=self.checkpoint_path,
-        #         model_class_configurator=VocoderConfigurator,
-        #         model_sd_ops=VOCODER_COMFY_KEYS_FILTER,
-        #         registry=self.registry,
-        #     )
+            self.vocoder_builder = Builder(
+                model_path=self.checkpoint_path,
+                model_class_configurator=VocoderConfigurator,
+                model_sd_ops=VOCODER_COMFY_KEYS_FILTER,
+                registry=self.registry,
+                load_model= self.load_model,
+            )
 
         #     # Embeddings processor only needs the LTX checkpoint (no Gemma weights)
-        #     self.embeddings_processor_builder = Builder(
-        #         model_path=self.checkpoint_path,
-        #         model_class_configurator=EmbeddingsProcessorConfigurator,
-        #         model_sd_ops=EMBEDDINGS_PROCESSOR_KEY_OPS,
-        #         registry=self.registry,
-        #     )
+            # self.embeddings_processor_builder = Builder(
+            #     model_path=self.checkpoint_path,
+            #     model_class_configurator=EmbeddingsProcessorConfigurator,
+            #     model_sd_ops=EMBEDDINGS_PROCESSOR_KEY_OPS,
+            #     registry=self.registry,
+            #     load_model= self.load_model,
+            # )
 
         #     if self.gemma_root_path is not None:
         #         module_ops = module_ops_from_gemma_root(self.gemma_root_path)
@@ -305,7 +327,7 @@ class ModelLedger:
             if self.gguf_dit:
                 return X0Model(self.transformer_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit)).eval()
             else:
-                return X0Model(self.transformer_builder.build(device=self._target_device(), dtype=self.dtype)).to(self.device).eval()
+                return X0Model(self.transformer_builder.build_(device=self._target_device(), dtype=self.dtype)).to(self.device).eval()
         else:
             sd_ops = self.transformer_builder.model_sd_ops
             if self.quantization.sd_ops is not None:
@@ -318,7 +340,7 @@ class ModelLedger:
                 module_ops=(*self.transformer_builder.module_ops, *self.quantization.module_ops),
                 model_sd_ops=sd_ops,
             )
-            return X0Model(builder.build(device=self._target_device())).to(self.device).eval()
+            return X0Model(builder.build_(device=self._target_device())).to(self.device).eval()
 
     def video_decoder(self) -> VideoDecoder:
         if not hasattr(self, "vae_decoder_builder"):
@@ -328,7 +350,7 @@ class ModelLedger:
         if self.gguf_dit:
             return self.vae_decoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit,encoded=False).eval()
         else:
-            return self.vae_decoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit,encoded=False).to(self.device).eval()
+            return self.vae_decoder_builder.build_(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
 
     def video_encoder(self) -> VideoEncoder:
         if not hasattr(self, "vae_encoder_builder"):
@@ -338,7 +360,7 @@ class ModelLedger:
         if self.gguf_dit:
             return self.vae_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit,encoded=True).eval()
         else:
-            return self.vae_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit,encoded=True).to(self.device).eval()
+            return self.vae_encoder_builder.build_(device=self._target_device(), dtype=self.dtype,).to(self.device).eval()
 
     def text_encoder(self) -> GemmaTextEncoder:
         if not hasattr(self, "text_encoder_builder"):
@@ -350,7 +372,7 @@ class ModelLedger:
         if self.gguf_dit:
             return self.text_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).eval()
         else:
-            return self.text_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).to(self.device).eval()
+            return self.text_encoder_builder.build_(device=self._target_device(), dtype=self.dtype,).to(self.device).eval()
 
     def gemma_embeddings_processor(self) -> EmbeddingsProcessor:
         if not hasattr(self, "embeddings_processor_builder"):
@@ -364,7 +386,7 @@ class ModelLedger:
             )
         else:
             return (
-                self.embeddings_processor_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit)
+                self.embeddings_processor_builder.build_(device=self._target_device(), dtype=self.dtype)
                 .to(self.device)
                 .eval()
             )
@@ -375,9 +397,9 @@ class ModelLedger:
                 "Audio encoder not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
         if self.gguf_dit:
-            return self.audio_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).eval()
+            return self.audio_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit,encoded=True).eval()
         else:
-            return self.audio_encoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).to(self.device).eval()
+            return self.audio_encoder_builder.build_(device=self._target_device(), dtype=self.dtype,).to(self.device).eval()
 
     def audio_decoder(self) -> AudioDecoder:
         if not hasattr(self, "audio_decoder_builder"):
@@ -385,9 +407,9 @@ class ModelLedger:
                 "Audio decoder not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
         if self.gguf_dit:
-            return self.audio_decoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).eval()
+            return self.audio_decoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit,encoded=False).eval()
         else:
-            return self.audio_decoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).to(self.device).eval()
+            return self.audio_decoder_builder.build_(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
     def vocoder(self) -> Vocoder:
         if not hasattr(self, "vocoder_builder"):
             raise ValueError(
@@ -396,12 +418,11 @@ class ModelLedger:
         if self.gguf_dit:
             return self.vocoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).eval()
         else:
-            return self.vocoder_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).to(self.device).eval()
-
+            return self.vocoder_builder.build_(device=self._target_device(), dtype=self.dtype).to(self.device).eval()
     def spatial_upsampler(self) -> LatentUpsampler:
         if not hasattr(self, "upsampler_builder"):
             raise ValueError("Upsampler not initialized. Please provide upsampler path to the ModelLedger constructor.")
         if self.gguf_dit:
             return self.upsampler_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).eval()
         else:
-            return self.upsampler_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit).to(self.device).eval()
+            return self.upsampler_builder.build_(device=self._target_device(), dtype=self.dtype,).to(self.device).eval()

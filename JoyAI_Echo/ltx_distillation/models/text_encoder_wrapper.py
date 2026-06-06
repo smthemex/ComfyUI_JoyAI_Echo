@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 from ...ltx_core.loader.registry import Registry
-from ...utils import _streaming_model
+from ...utils import streaming_single_model,streaming_prefetch_model
 
 class GemmaTextEncoderWrapper(nn.Module):
     """
@@ -42,16 +42,25 @@ class GemmaTextEncoderWrapper(nn.Module):
         self.device = device
         self.dtype = dtype
         self.prefetch_count=None
+        self.encode_count=0
+        self.enable_streaming=False
+
 
     def _model_ctx(self,model,prefetch_count: int | None,) :
         if prefetch_count is not None:
-            return _streaming_model(
-                model,
-                layers_attr="model.model.language_model.layers",
-                target_device=torch.device("cuda"),
-                prefetch_count=prefetch_count,
-            )
-
+            if not self.enable_streaming:
+                return streaming_single_model(
+                    model,
+                    layers_attr="model.model.language_model.layers",
+                    target_device=torch.device("cuda"),
+                )
+            else:
+                return streaming_prefetch_model(
+                    model,
+                    layers_attr="model.model.language_model.layers",
+                    target_device=torch.device("cuda"),
+                    prefetch_count=prefetch_count,
+                )
         return model
 
 
@@ -75,7 +84,8 @@ class GemmaTextEncoderWrapper(nn.Module):
                 - attention_mask: [B, seq_len] attention mask
         """
         batch_size = len(text_prompts)
-        print(self.prefetch_count)
+        print("encode prompt:",self.encode_count)
+        self.encode_count+=1
         # Encode each prompt
         video_contexts = []
         audio_contexts = []
@@ -146,8 +156,8 @@ def create_text_encoder_wrapper(
         gemma_root_path=gemma_root,
         loras=[],
         quantization=None,
-        gguf_dit=True,
-        load_mode="clip",
+        gguf_dit=True ,
+        load_model="clip",
         clip_path=gemma_path,
     )
 

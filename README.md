@@ -3,6 +3,7 @@
 
 Update
 ----
+* 2023.6.6 新增TE的safetesor 支持，大显存可以设置preftch 为0 或者开启streaming ；目前只支持t2v，i2v需要官方的1.5版模型，在训练了，等等
 * 复现官方代码， 3050 6G即可 跑5分钟 848*512 故事板长视频，无任何字幕，拼接自然
 * just need 6G Vram to infer 5 minutes long video ，no word
 
@@ -34,13 +35,14 @@ pip install -r requirements.txt
 |     ├──JoyAI-Echo-Q8_0.gguf
 |     ├──JoyAI-Echo-Q6_K.gguf
 ├── ComfyUI/models/clip/ 
+|     ├── gemma-3-12b-it-qat.safetensors
 |     ├── connector.safetensors  # or 11 version
 ```
 
 4 Example
 ----
 
-![ ](https://github.com/smthemex/ComfyUI_JoyAI_Echo/blob/main/example_workflows/example.png)
+![](https://github.com/smthemex/ComfyUI_JoyAI_Echo/tree/main/example_workflows/example.png)
 
 5 Citation
 ----

@@ -44,7 +44,9 @@ from .ltx_distillation.utils import (
     save_memory_bank_frames,
     write_benchmark_media,
 )
-from .utils import _streaming_model
+
+
+from .utils import streaming_single_model,streaming_prefetch_model
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "inference.yaml"
 
@@ -164,8 +166,11 @@ def load_joyai_te(gemma_path,connector_path,gemma_root,device, dtype=torch.bfloa
     return text_encoder
 
 
-def infer_joyai_text(text_encoder, prompt_files):
+def infer_joyai_text(text_encoder, prompt_files,device):
+    if text_encoder.prefetch_count is None:
+        text_encoder.text_encoder.to(device)
     cached: dict[Path, list[dict[str, Any]]] = {}
+
     for prompts_file in prompt_files:
         prompts_file = Path(prompts_file)
         prompts = load_multishot_prompts(prompts_file, prompt_max_chars=None)
@@ -183,6 +188,8 @@ def infer_joyai_text(text_encoder, prompt_files):
             )
             del cond
         cached[prompts_file] = file_conds
+    if text_encoder.prefetch_count is None:
+        text_encoder.text_encoder.to("cpu")
     del text_encoder
     import gc
     gc.collect()
@@ -281,6 +288,8 @@ class InferenceEngine:
         self._checkpoint = cfg.checkpoint
         self._gemma_path = ""
         self.prefetch_count=None
+        self.enable_tiles=False
+        self.enable_streaming=False
         # Stage-2 modules — populated by load_generator().
         self.generator = None
         self.video_vae = None
@@ -339,13 +348,20 @@ class InferenceEngine:
     # Stage 2: load generator + VAEs
     # ------------------------------------------------------------------
     def _model_ctx(self,model,prefetch_count: int | None,) :
-        if prefetch_count is not None:
-            return _streaming_model(
-                model,
-                layers_attr="model.velocity_model.transformer_blocks",
-                target_device=torch.device("cuda"),
-                prefetch_count=prefetch_count,
-            )
+        if prefetch_count is not None :
+            if not self.enable_streaming:
+                return streaming_single_model(
+                    model,
+                    layers_attr="model.velocity_model.transformer_blocks",
+                    target_device=torch.device("cuda"),
+                )
+            else:
+                return streaming_prefetch_model(
+                    model,
+                    layers_attr="model.velocity_model.transformer_blocks",
+                    target_device=torch.device("cuda"),
+                    prefetch_count=prefetch_count,
+                )
         return model 
     
     def load_generator(self) -> None:
@@ -361,7 +377,7 @@ class InferenceEngine:
                     LTXV_LORA_COMFY_RENAMING_MAP,
                 ),
             )
-
+        
         self.generator = create_ltx2_wrapper(
             checkpoint_path=self._checkpoint,
             gemma_path=self._gemma_path,
@@ -371,10 +387,12 @@ class InferenceEngine:
             video_width=int(cfg.video_width),
             loras=loras,
         )
+       
         self.generator.eval()
 
         # Load VAEs to CPU; we hot-swap encoder/decoders per phase to avoid
         # holding ~30GB generator and VAE decoders on GPU at the same time.
+       
         self.video_vae, self.audio_vae = create_vae_wrappers(
             vae_path=self.cfg.vae_path,
             audio_vae_path=self.cfg.audio_vae_path,
@@ -384,6 +402,16 @@ class InferenceEngine:
             with_audio_encoder=True,
             decoder_device=torch.device("cpu"),
         )
+        # else:
+        #     self.video_vae, self.audio_vae = create_vae_wrappers_(
+        #         checkpoint_path=self._checkpoint,
+        #         device=torch.device("cpu"),
+        #         dtype=self.dtype,
+        #         with_video_encoder=True,
+        #         with_audio_encoder=True,
+        #         decoder_device=torch.device("cpu"),
+        #     )
+        
         self.video_vae.eval()
         self.audio_vae.eval()
 
@@ -515,7 +543,7 @@ class InferenceEngine:
 
         run_started = time.perf_counter()
         shot_durations: list[dict[str, float]] = []
-        print(self.prefetch_count)
+        #print(self.prefetch_count)
         with self._model_ctx(self.generator,self.prefetch_count) as self.generator:
 
             for shot_idx, prompt in enumerate(prompts):
@@ -556,6 +584,7 @@ class InferenceEngine:
                             target_w=int(cfg.video_width),
                             device=device,
                             dtype=dtype,
+                            
                         )
                         self._stage_after_video_encode()
 
@@ -601,7 +630,7 @@ class InferenceEngine:
                     else None
                 )
                 video_uint8, audio_waveform = decode_benchmark_sample(
-                    self.video_vae, self.audio_vae, video_latent, audio_latent
+                    self.video_vae, self.audio_vae, video_latent, audio_latent,self.enable_tiles
                 )
                
                 if device.type == "cuda":
