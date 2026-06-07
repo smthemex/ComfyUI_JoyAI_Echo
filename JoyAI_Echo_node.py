@@ -101,8 +101,8 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
             "video_height": height,
             # "steps": steps,
             "seed": seed,
-            "video_fps": num_frames,
-            "frame_rate": frame_rate,
+            "num_frames": num_frames,
+            "video_fps": frame_rate,
         }
 
         images,audio=infer_joyai_video(model, te_cond,cli_overrides)
