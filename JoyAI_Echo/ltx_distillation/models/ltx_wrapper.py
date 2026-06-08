@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-
+from tqdm import tqdm
 from ...ltx_core.components.patchifiers import (
     AudioPatchifier,
     VideoLatentPatchifier,
@@ -828,7 +828,9 @@ class LTX2DiffusionWrapper(nn.Module):
         audio = torch.randn(audio_shape, device=device, dtype=dtype)
 
         # Few-step denoising
-        for i, sigma in enumerate(self.denoising_sigmas[:-1]):
+        total_steps = len(self.denoising_sigmas) - 1
+        for i, sigma in enumerate(tqdm(self.denoising_sigmas[:-1], desc=f"Memory Denoising {total_steps} steps", total=total_steps)):
+        #for i, sigma in enumerate(self.denoising_sigmas[:-1]):
             video_sigma = sigma * torch.ones([B, F_v], device=device)
             audio_sigma = sigma * torch.ones([B, F_a], device=device)
 
@@ -917,8 +919,9 @@ class LTX2DiffusionWrapper(nn.Module):
             if paired_audio_memory
             else {}
         )
-
-        for idx, sigma in enumerate(self.denoising_sigmas[:-1]):
+        total_steps = len(self.denoising_sigmas) - 1
+        for idx, sigma in enumerate(tqdm(self.denoising_sigmas[:-1], desc=f"Memory Denoising {total_steps} steps", total=total_steps)):
+        #for idx, sigma in enumerate(self.denoising_sigmas[:-1]):
             video_sigma = sigma * torch.ones([batch_size, num_video_frames], device=device, dtype=dtype)
             audio_sigma = sigma * torch.ones([batch_size, num_audio_frames], device=device, dtype=dtype)
 
@@ -1099,116 +1102,18 @@ def create_ltx2_wrapper(
     x0_model = ledger.transformer()
     del ledger
     # Move to target device
-    prefetch_count=None
-    if prefetch_count is None:
-        x0_model = x0_model.to(device=device, dtype=dtype)
-        gpu_manager= None
-    else:
-        gpu_manager=BlockGPUManager(block_group_size=prefetch_count)
-        gpu_manager.setup_for_inference(x0_model.velocity_model)
+
+    x0_model = x0_model.to(device=device, dtype=dtype)
+  
     wrapper = LTX2DiffusionWrapper(
         model=x0_model,
         video_height=video_height,
         video_width=video_width,
         
     )
-    wrapper.gpu_manager = gpu_manager
+
     
     return wrapper
 
-def create_ltx2_wrapper_(
-    checkpoint_path: str,
-    gemma_path: str,
-    device: torch.device,
-    dtype: torch.dtype = torch.bfloat16,
-    video_height: int = 512,
-    video_width: int = 768,
-    loras: tuple[LoraPathStrengthAndSDOps, ...] = (),
-    registry: Registry | None = None,
-) -> LTX2DiffusionWrapper:
-    """
-    Factory function to create LTX2DiffusionWrapper from checkpoint.
-
-    Args:
-        checkpoint_path: Path to LTX-2 checkpoint
-        gemma_path: Path to Gemma text encoder
-        device: Target device
-        dtype: Model dtype
-        video_height: Video height
-        video_width: Video width
-
-    Returns:
-        Configured LTX2DiffusionWrapper
-    """
-    from ...ltx_pipelines.utils.model_ledger import ModelLedger
-
-    # IMPORTANT: Load to CPU first, then move to target device
-    # safetensors doesn't support device indices like "cuda:4"
-    # It only accepts "cuda" or "cpu"
-    ledger = ModelLedger(
-        dtype=dtype,
-        device=torch.device("cpu"),  # Load to CPU first
-        checkpoint_path=checkpoint_path,
-        gemma_root_path=gemma_path,
-        loras=loras,
-        registry=registry,
-        gguf_dit=False,
-        load_model="origin",
-    )
-
-
-    # Get X0Model (wraps velocity model)
-    x0_model = ledger.transformer()
-
-    # ledger = ModelLedger(
-    #     dtype=dtype,
-    #     device=torch.device("cpu"),
-    #     checkpoint_path=checkpoint_path,
-    #     registry=registry,
-    #     gguf_dit=False,
-    #     load_model="origin",
-    # )
-
-    video_encoder = ledger.video_encoder()  #if with_video_encoder else None
-    video_decoder = ledger.video_decoder()
-    audio_encoder = ledger.audio_encoder()  #if with_audio_encoder else None
-    audio_decoder = ledger.audio_decoder()
-    vocoder = ledger.vocoder()
-
-    # Move to target device
-    if video_encoder is not None:
-        video_encoder = video_encoder.to(device=device, dtype=dtype)
-    video_decoder = video_decoder.to(device=decoder_device, dtype=dtype)
-    if audio_encoder is not None:
-        audio_encoder = audio_encoder.to(device=device, dtype=torch.float32)
-    audio_decoder = audio_decoder.to(device=decoder_device, dtype=dtype)
-    vocoder = vocoder.to(device=decoder_device, dtype=dtype)
-
-    video_vae = VideoVAEWrapper(
-        encoder=video_encoder,
-        decoder=video_decoder,
-        device=device,
-        dtype=dtype,
-    )
-
-    audio_vae = AudioVAEWrapper(
-        encoder=audio_encoder,
-        decoder=audio_decoder,
-        vocoder=vocoder,
-        device=device,
-        dtype=dtype,
-    )
-
-
-    # Move to target device
-    x0_model = x0_model.to(device=device, dtype=dtype)
-
-    wrapper = LTX2DiffusionWrapper(
-        model=x0_model,
-        video_height=video_height,
-        video_width=video_width,
-    )
-    
-    return wrapper,video_vae,audio_vae
 
 

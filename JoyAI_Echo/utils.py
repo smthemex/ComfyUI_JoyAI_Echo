@@ -1,7 +1,7 @@
 from diffusers.quantizers.gguf.utils import dequantize_gguf_tensor
 
 from contextlib import contextmanager
-from .layer_streaming import SimpleLayerStreamingWrapper,LayerStreamingWrapper
+from .layer_streaming import SimpleLayerStreamingWrapper,LayerStreamingWrapper,SimpleLayerTEWrapper
 from collections.abc import Iterator
 from typing import TypeVar
 import gc
@@ -11,6 +11,17 @@ import torch
 _M = TypeVar("_M", bound=torch.nn.Module)
 T = TypeVar("T")
 
+
+@contextmanager
+def _full_gpu_ctx(model,device=None):
+    """Context manager to load the entire model to GPU and release it after use."""
+    try:
+        if device is not None:
+            device = torch.device(device)
+            model.to(device)
+        yield model
+    finally:
+        model.to("cpu")
 
 
 def cleanup_memory() -> None:
@@ -49,6 +60,35 @@ def streaming_single_model(
             print("Host empty cache cleanup failed; ignoring.", exc_info=True)
 
 @contextmanager
+def streaming_single_te(
+    model: _M,  # 模型参数，类型为_M
+    layers_attr: str,  # 属性字符串，用于指定模型中的层
+    target_device: torch.device,  # 目标设备，用于指定模型运行在哪个设备上
+) -> Iterator[_M]:
+    """Wrap *model* with :class:`LayerStreamingWrapper`, yield it, then tear down."""
+    wrapped = SimpleLayerTEWrapper(
+        model,
+        layers_attr=layers_attr,
+        target_device=target_device,
+    )
+    try:
+        yield wrapped  # type: ignore[misc]
+    finally:
+        wrapped.to("cpu")
+        cleanup_memory()
+        # Flush the host (pinned) memory cache so that freed pinned pages are
+        # returned to the OS.  Without this, sequential streaming models
+        # (e.g. text encoder then transformer) exhaust host memory because the
+        # CachingHostAllocator keeps freed blocks cached indefinitely.
+        torch.cuda.synchronize(device=target_device)
+        try:
+            if hasattr(torch._C, "_host_emptyCache"):
+                torch._C._host_emptyCache()
+        except Exception:
+            print("Host empty cache cleanup failed; ignoring.", exc_info=True)
+
+
+@contextmanager
 def streaming_prefetch_model(
     model: _M,
     layers_attr: str,
@@ -65,6 +105,8 @@ def streaming_prefetch_model(
     try:
         yield wrapped  # type: ignore[misc]
     finally:
+        # if hasattr(wrapped, 'teardown'):
+        #     wrapped.teardown()
         wrapped.to("cpu")
         cleanup_memory()
         # Flush the host (pinned) memory cache so that freed pinned pages are
