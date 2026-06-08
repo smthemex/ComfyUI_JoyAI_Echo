@@ -22,8 +22,8 @@ import torch
 import yaml
 
 from .ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
-from .ltx_distillation.inference.bidirectional_pipeline import BidirectionalAVInferencePipeline
-from .ltx_distillation.inference.memory_bidirectional_pipeline import BidirectionalMemoryAVInferencePipeline
+# from .ltx_distillation.inference.bidirectional_pipeline import BidirectionalAVInferencePipeline
+# from .ltx_distillation.inference.memory_bidirectional_pipeline import BidirectionalMemoryAVInferencePipeline
 from .ltx_distillation.inference.memory_multishot import (
     PairedAudioVideoMemoryBank,
     audio_waveform_stats,
@@ -44,9 +44,9 @@ from .ltx_distillation.utils import (
     save_memory_bank_frames,
     write_benchmark_media,
 )
+from .ltx_core.model.transformer.model import BlockGPUManager
 
-
-from .utils import streaming_single_model,streaming_prefetch_model
+from .utils import streaming_single_model,streaming_prefetch_model,_full_gpu_ctx,streaming_single_te
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "inference.yaml"
 
@@ -289,7 +289,7 @@ class InferenceEngine:
         self._gemma_path = ""
         self.prefetch_count=None
         self.enable_tiles=False
-        self.enable_streaming=False
+        self.streaming_mode="fast"
         # Stage-2 modules — populated by load_generator().
         self.generator = None
         self.video_vae = None
@@ -297,6 +297,8 @@ class InferenceEngine:
         self.base_pipeline = None
         self.memory_pipeline = None
         self.audio_sample_rate: int | None = None
+        self.tile_size_in_frames=24
+        self.tile_size_in_pixels=512
 
     # ------------------------------------------------------------------
     # Stage 1: encode prompts, then free text encoder
@@ -347,22 +349,35 @@ class InferenceEngine:
     # ------------------------------------------------------------------
     # Stage 2: load generator + VAEs
     # ------------------------------------------------------------------
+
     def _model_ctx(self,model,prefetch_count: int | None,) :
         if prefetch_count is not None :
-            if not self.enable_streaming:
-                return streaming_single_model(
+            if self.streaming_mode=="fast":
+                return streaming_single_te(
                     model,
                     layers_attr="model.velocity_model.transformer_blocks",
                     target_device=torch.device("cuda"),
                 )
-            else:
+            elif self.streaming_mode=="slow":
+                    return streaming_single_model(
+                        model,
+                        layers_attr="model.velocity_model.transformer_blocks",
+                        target_device=torch.device("cuda"),
+                    )
+            elif self.streaming_mode=="prefetch":
                 return streaming_prefetch_model(
                     model,
                     layers_attr="model.velocity_model.transformer_blocks",
                     target_device=torch.device("cuda"),
                     prefetch_count=prefetch_count,
                 )
-        return model 
+            else:
+                gpu_manager=BlockGPUManager(block_group_size=prefetch_count)
+                gpu_manager.setup_for_inference(model.model.velocity_model)
+                model.gpu_manager=gpu_manager
+                return _full_gpu_ctx(model)
+        
+        return _full_gpu_ctx(model)
     
     def load_generator(self) -> None:
         cfg = self.cfg
@@ -402,34 +417,14 @@ class InferenceEngine:
             with_audio_encoder=True,
             decoder_device=torch.device("cpu"),
         )
-        # else:
-        #     self.video_vae, self.audio_vae = create_vae_wrappers_(
-        #         checkpoint_path=self._checkpoint,
-        #         device=torch.device("cpu"),
-        #         dtype=self.dtype,
-        #         with_video_encoder=True,
-        #         with_audio_encoder=True,
-        #         decoder_device=torch.device("cpu"),
-        #     )
+
         
         self.video_vae.eval()
         self.audio_vae.eval()
 
         self.generator.denoising_sigmas = torch.tensor(list(cfg.denoising_sigmas), device=self.device, dtype=torch.float32)
         self.generator.memory_downscale_factor=int(cfg.memory_downscale_factor)
-        # self.base_pipeline = BidirectionalAVInferencePipeline(
-        #     generator=self.generator,
-        #     add_noise_fn=add_noise,
-        #     denoising_sigmas=denoising_sigmas,
-           
-        # )
-        # self.memory_pipeline = BidirectionalMemoryAVInferencePipeline(
-        #     generator=self.generator,
-        #     add_noise_fn=add_noise,
-        #     denoising_sigmas=denoising_sigmas,
-        #     memory_downscale_factor=int(cfg.memory_downscale_factor),
-          
-        # )
+
 
         self.audio_sample_rate = self.audio_vae.get_output_sample_rate() or 24000
         print(f"[Stage 2] Generator + VAEs ready.", flush=True)
@@ -545,7 +540,6 @@ class InferenceEngine:
         shot_durations: list[dict[str, float]] = []
         #print(self.prefetch_count)
         with self._model_ctx(self.generator,self.prefetch_count) as self.generator:
-
             for shot_idx, prompt in enumerate(prompts):
                 shot_started = time.perf_counter()
                 conditional_dict = {
@@ -573,7 +567,7 @@ class InferenceEngine:
                     torch.manual_seed(prompt_seed)
                     if device.type == "cuda":
                         torch.cuda.manual_seed(prompt_seed)
-
+                    #video_latent=torch.load("D:\\Downloads\\joy_echo_lt_cond.pt")
                     if len(memory_bank) > 0:
                         # Briefly bring video encoder onto GPU.
                         self._stage_for_video_encode()
@@ -624,13 +618,15 @@ class InferenceEngine:
                 self._stage_for_decode()
 
                 decode_started = time.perf_counter()
+
                 audio_memory_latent = (
                     audio_latent.detach().cpu().contiguous()
                     if (cfg.enable_audio_memory and audio_latent is not None)
                     else None
                 )
+
                 video_uint8, audio_waveform = decode_benchmark_sample(
-                    self.video_vae, self.audio_vae, video_latent, audio_latent,self.enable_tiles
+                    self.video_vae, self.audio_vae, video_latent, audio_latent,self.enable_tiles,self.tile_size_in_frames,self.tile_size_in_pixels
                 )
                
                 if device.type == "cuda":
@@ -783,64 +779,64 @@ def parse_args():
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
+# def main() -> None:
+#     args = parse_args()
 
-    config_path = Path(args.config).expanduser().resolve()
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+#     config_path = Path(args.config).expanduser().resolve()
+#     if not config_path.exists():
+#         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    cli_overrides = {}
-    for key in ["seed", "num_frames", "video_height", "video_width", "video_fps",
-                "v2a_grad_scale", "memory_max_size", "num_fix_frames", "enable_audio_memory"]:
-        val = getattr(args, key, None)
-        if val is not None:
-            cli_overrides[key] = val
-    if args.prompts_dir:
-        cli_overrides["prompts_dir"] = str(Path(args.prompts_dir).expanduser().resolve())
-    if args.prompts_glob:
-        cli_overrides["prompts_glob"] = args.prompts_glob
-    if args.output_root:
-        cli_overrides["output_root"] = str(Path(args.output_root).expanduser().resolve())
+#     cli_overrides = {}
+#     for key in ["seed", "num_frames", "video_height", "video_width", "video_fps",
+#                 "v2a_grad_scale", "memory_max_size", "num_fix_frames", "enable_audio_memory"]:
+#         val = getattr(args, key, None)
+#         if val is not None:
+#             cli_overrides[key] = val
+#     if args.prompts_dir:
+#         cli_overrides["prompts_dir"] = str(Path(args.prompts_dir).expanduser().resolve())
+#     if args.prompts_glob:
+#         cli_overrides["prompts_glob"] = args.prompts_glob
+#     if args.output_root:
+#         cli_overrides["output_root"] = str(Path(args.output_root).expanduser().resolve())
 
-    cfg = InferenceConfig(config_path, **cli_overrides)
+#     cfg = InferenceConfig(config_path, **cli_overrides)
 
-    if len(cfg.denoising_steps) != len(cfg.denoising_sigmas):
-        raise ValueError("denoising steps and sigmas must have the same length")
+#     if len(cfg.denoising_steps) != len(cfg.denoising_sigmas):
+#         raise ValueError("denoising steps and sigmas must have the same length")
 
-    engine = InferenceEngine(cfg)
+#     engine = InferenceEngine(cfg)
 
-    # Discover prompt files
-    prompts_dir = Path(cfg.prompts_dir)
-    prompts_pattern = cfg.prompts_glob
-    if not prompts_pattern.startswith("/"):
-        prompt_files = sorted(prompts_dir.glob(prompts_pattern))
-    else:
-        prompt_files = sorted(Path(p) for p in glob(prompts_pattern))
+#     # Discover prompt files
+#     prompts_dir = Path(cfg.prompts_dir)
+#     prompts_pattern = cfg.prompts_glob
+#     if not prompts_pattern.startswith("/"):
+#         prompt_files = sorted(prompts_dir.glob(prompts_pattern))
+#     else:
+#         prompt_files = sorted(Path(p) for p in glob(prompts_pattern))
 
-    if not prompt_files:
-        raise FileNotFoundError(f"No prompt files matched: {prompts_dir / prompts_pattern}")
+#     if not prompt_files:
+#         raise FileNotFoundError(f"No prompt files matched: {prompts_dir / prompts_pattern}")
 
-    print(f"[Inference] Found {len(prompt_files)} prompt file(s)", flush=True)
+#     print(f"[Inference] Found {len(prompt_files)} prompt file(s)", flush=True)
 
-    # Stage 1: encode all prompts across all files, then release text encoder.
-    cached_per_file = engine.encode_all_prompts(prompt_files)
+#     # Stage 1: encode all prompts across all files, then release text encoder.
+#     cached_per_file = engine.encode_all_prompts(prompt_files)
 
-    # Stage 2: now load the generator + VAEs.
-    engine.load_generator()
+#     # Stage 2: now load the generator + VAEs.
+#     engine.load_generator()
 
-    # Stage 3: run inference for each file using the pre-encoded prompts.
-    output_root = Path(cfg.output_root) / "outputs"
-    for prompts_file in prompt_files:
-        cached = cached_per_file.get(prompts_file, [])
-        if not cached:
-            continue
-        prompt_name = prompts_file.stem
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_output_dir = output_root / prompt_name / f"inference_{timestamp}"
-        engine.run_prompt_file(prompts_file, run_output_dir, cached)
+#     # Stage 3: run inference for each file using the pre-encoded prompts.
+#     output_root = Path(cfg.output_root) / "outputs"
+#     for prompts_file in prompt_files:
+#         cached = cached_per_file.get(prompts_file, [])
+#         if not cached:
+#             continue
+#         prompt_name = prompts_file.stem
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         run_output_dir = output_root / prompt_name / f"inference_{timestamp}"
+#         engine.run_prompt_file(prompts_file, run_output_dir, cached)
 
-    print(f"[Inference] All {len(prompt_files)} prompt file(s) processed.", flush=True)
+#     print(f"[Inference] All {len(prompt_files)} prompt file(s) processed.", flush=True)
 
 
 # if __name__ == "__main__":

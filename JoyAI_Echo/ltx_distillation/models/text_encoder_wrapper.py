@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 from ...ltx_core.loader.registry import Registry
-from ...utils import streaming_single_model,streaming_prefetch_model
+from ...utils import streaming_single_te,streaming_prefetch_model,_full_gpu_ctx
 
 class GemmaTextEncoderWrapper(nn.Module):
     """
@@ -49,7 +49,7 @@ class GemmaTextEncoderWrapper(nn.Module):
     def _model_ctx(self,model,prefetch_count: int | None,) :
         if prefetch_count is not None:
             if not self.enable_streaming:
-                return streaming_single_model(
+                return streaming_single_te(
                     model,
                     layers_attr="model.model.language_model.layers",
                     target_device=torch.device("cuda"),
@@ -61,7 +61,7 @@ class GemmaTextEncoderWrapper(nn.Module):
                     target_device=torch.device("cuda"),
                     prefetch_count=prefetch_count,
                 )
-        return model
+        return _full_gpu_ctx(model)
 
 
     @torch.no_grad()
@@ -90,35 +90,7 @@ class GemmaTextEncoderWrapper(nn.Module):
         video_contexts = []
         audio_contexts = []
         attention_masks = []
-        if self.prefetch_count is not None:
-            with self._model_ctx(self.text_encoder, self.prefetch_count) as self.text_encoder:
-                for prompt in text_prompts:
-                    # 1) Run Gemma LLM to get raw hidden states + attention mask
-                    hidden_states, attn_mask = self.text_encoder.encode(prompt, padding_side=padding_side)
-                    # 2) Process hidden states to obtain final embeddings
-                    output = self.embeddings_processor.process_hidden_states(
-                        hidden_states, attn_mask, padding_side=padding_side
-                    )
-
-                    video_contexts.append(output.video_encoding)
-                    audio_contexts.append(output.audio_encoding)
-                    attention_masks.append(output.attention_mask)
-
-                # Stack batch
-                video_context = torch.cat(video_contexts, dim=0) if len(video_contexts) > 0 else None
-                # Handle optional audio connector (may be None depending on config)
-                if any(ac is None for ac in audio_contexts):
-                    audio_context = None
-                else:
-                    audio_context = torch.cat(audio_contexts, dim=0)
-                attention_mask = torch.cat(attention_masks, dim=0) if len(attention_masks) > 0 else None
-
-                return {
-                    "video_context": video_context,
-                    "audio_context": audio_context,
-                    "attention_mask": attention_mask,
-                }
-        else: # 无法用with包装，暂时改成判断
+        with self._model_ctx(self.text_encoder, self.prefetch_count) as self.text_encoder:
             for prompt in text_prompts:
                 # 1) Run Gemma LLM to get raw hidden states + attention mask
                 hidden_states, attn_mask = self.text_encoder.encode(prompt, padding_side=padding_side)

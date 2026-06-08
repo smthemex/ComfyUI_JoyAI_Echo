@@ -75,10 +75,12 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
                 io.Int.Input("height", default=512, min=256, max=nodes.MAX_RESOLUTION,step=32,display_mode=io.NumberDisplay.number),
                 io.Int.Input("seed", default=0, min=0, max=MAX_SEED,display_mode=io.NumberDisplay.number),
                 io.Int.Input("num_frames", default=121, min=16, max=MAX_SEED,step=1,display_mode=io.NumberDisplay.number),
-                io.Float.Input("frame_rate", default=24.0, min=8.0, max=120.0,step=1.0,display_mode=io.NumberDisplay.number),
+                io.Float.Input("frame_rate", default=25.0, min=8.0, max=120.0,step=1.0,display_mode=io.NumberDisplay.number),
                 io.Int.Input("prefetch_count", default=1, min=0, max=48,step=1,display_mode=io.NumberDisplay.number),
-                io.Boolean.Input("enable_tile", default=False),
-                io.Boolean.Input("enable_streaming", default=False),
+                io.Boolean.Input("enable_tiles", default=False),
+                io.Int.Input("tile_size_in_frames", default=24, min=16, max=1024,step=8,display_mode=io.NumberDisplay.number),
+                io.Int.Input("tile_size_in_pixels",default=512, min=64, max=4096,step=32,display_mode=io.NumberDisplay.number),
+                io.Combo.Input("streaming_mode",options= ["fast","swap","slow","prefetch"] ),
                 io.Conditioning.Input("te_cond",optional=True),
             ], 
             outputs=[
@@ -87,15 +89,17 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
             ],
         )
     @classmethod
-    def execute(cls, model,width,height,seed,num_frames,frame_rate,prefetch_count,enable_tile,enable_streaming,te_cond=None) -> io.NodeOutput:
+    def execute(cls, model,width,height,seed,num_frames,frame_rate,prefetch_count,enable_tiles,tile_size_in_frames,tile_size_in_pixels,streaming_mode,te_cond=None) -> io.NodeOutput:
         clear_comfyui_cache()
         if te_cond is None:
             if not os.path.exists(os.path.join(folder_paths.get_output_directory(),"joy_echo_te_cond.pt")):
                 raise Exception("te_cond is None or comfyUI outpu dont exist joy_echo_te_cond.pt  ")
             te_cond = torch.load(os.path.join(folder_paths.get_output_directory(),"joy_echo_te_cond.pt"),weights_only=False)
         model.prefetch_count=prefetch_count if prefetch_count > 0 else None
-        model.enable_tile=enable_tile
-        model.enable_streaming=enable_streaming
+        model.enable_tiles=enable_tiles
+        model.streaming_mode=streaming_mode
+        model.tile_size_in_frames=tile_size_in_frames
+        model.tile_size_in_pixels=tile_size_in_pixels
         cli_overrides = {
             "video_width": width,
             "video_height": height,

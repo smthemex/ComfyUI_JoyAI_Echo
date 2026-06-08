@@ -11,7 +11,7 @@ import torch
 import torchaudio
 from torchvision.io import write_video
 from torchvision.transforms import functional as TVF
-from ..ltx_core.model.video_vae import TilingConfig
+from ..ltx_core.model.video_vae import TilingConfig,SpatialTilingConfig,TemporalTilingConfig
 from .inference.memory_multishot import (
     audio_waveform_stats,
     normalize_audio_waveform_for_media,
@@ -109,12 +109,19 @@ def encode_memory_frames_batch(
 
 
 @torch.no_grad()
-def decode_benchmark_sample(video_vae, audio_vae, video_latent, audio_latent,enable_tiles,):
-    tiling_config=TilingConfig.default() if enable_tiles else None
+def decode_benchmark_sample(video_vae, audio_vae, video_latent, audio_latent,enable_tiles,tile_size_in_frames,tile_size_in_pixels):
+    tiling_config=None
     if enable_tiles:
-        video_pixel = video_vae.decode_to_pixel(video_latent,tiling_config)
-    else:
-        video_pixel = video_vae.decode_to_pixel(video_latent)
+        tile_overlap_in_frames=24
+        tile_overlap_in_pixels=64
+        if tile_size_in_frames<=24:
+            tile_overlap_in_frames=tile_size_in_frames-8
+        if tile_size_in_pixels<=64:
+            tile_overlap_in_pixels=tile_size_in_pixels-32
+        tiling_config=TilingConfig(SpatialTilingConfig(tile_size_in_pixels=tile_size_in_pixels, tile_overlap_in_pixels=tile_overlap_in_pixels),TemporalTilingConfig(tile_size_in_frames=tile_size_in_frames, tile_overlap_in_frames=tile_overlap_in_frames))
+   
+    video_pixel = video_vae.decode_to_pixel(video_latent,tiling_config)
+   
     audio_waveform = audio_vae.decode_to_waveform(audio_latent) if audio_latent is not None else None
 
     video_uint8 = video_pixel[0]
@@ -165,7 +172,7 @@ def write_benchmark_media(
                     audio_np = audio_np.T  # [C, T] -> [T, C]
                 elif audio_np.ndim == 1:
                     pass # 单声道直接保存
-                sf.write(str(output_path.with_suffix(".wav")), audio_np, int(self.audio_sample_rate))
+                sf.write(str(output_path.with_suffix(".wav")), audio_np, int(audio_sr))
             except Exception as exc:
                 print(f"[warn] sf.write failed for {output_path}: {exc}; audio_stats={stats}", flush=True)
                 try:
