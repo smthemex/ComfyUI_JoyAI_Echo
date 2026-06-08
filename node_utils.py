@@ -20,7 +20,7 @@ def create_temp_json(prompts):
     prompts = [x for x in prompts if x]
 
     data = {"prompts": prompts}
-    prefix = uuid.uuid4().hex[:8]
+    prefix = uuid.uuid4().hex[:8]+datetime.now().strftime("%Y%m%d%H%M%S")
     temp_path = os.path.join(folder_paths.get_output_directory(), f"joyai_texts_input_{prefix}.json")
     with open(temp_path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(data, ensure_ascii=False) + "\n")     
