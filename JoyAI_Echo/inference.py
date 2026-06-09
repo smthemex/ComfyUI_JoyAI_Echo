@@ -142,6 +142,7 @@ class InferenceConfig:
 
         # Misc
         self.prompt_max_chars = None
+        self.shot_num_frames = None  # 新增：每个镜头的独立帧数列表
 
         # Apply CLI overrides
         for key, value in cli_overrides.items():
@@ -505,6 +506,7 @@ class InferenceEngine:
                 video_width=int(cfg.video_width),
             )
 
+        """
         video_shape, audio_shape = compute_latent_shapes(
             num_frames=int(cfg.num_frames),
             video_height=int(cfg.video_height),
@@ -512,6 +514,7 @@ class InferenceEngine:
             batch_size=1,
             video_fps=float(cfg.video_fps),
         )
+        """
 
         memory_bank = PairedAudioVideoMemoryBank(
             max_size=int(cfg.memory_max_size),
@@ -542,6 +545,26 @@ class InferenceEngine:
         with self._model_ctx(self.generator,self.prefetch_count) as self.generator:
             for shot_idx, prompt in enumerate(prompts):
                 shot_started = time.perf_counter()
+
+                # ========== 优化：计算当前 shot 的 num_frames，支持回退到全局 num_frames ==========
+                # 1. 如果配置了 shot_num_frames 列表，且当前 shot_idx 在列表范围内，则使用独立帧数
+                # 2. 否则（未配置、或列表长度小于 prompt 数量），回退使用全局的 cfg.num_frames
+                if cfg.shot_num_frames and shot_idx < len(cfg.shot_num_frames):
+                    current_num_frames = cfg.shot_num_frames[shot_idx]
+                else:
+                    current_num_frames = int(cfg.num_frames)
+                
+                # 为当前 shot 计算独立的 shape
+                video_shape, audio_shape = compute_latent_shapes(
+                    num_frames=current_num_frames,
+                    video_height=int(cfg.video_height),
+                    video_width=int(cfg.video_width),
+                    batch_size=1,
+                    video_fps=float(cfg.video_fps),
+                )
+                print(f"[Engine] Shot {shot_idx + 1}/{len(prompts)} using num_frames={current_num_frames}", flush=True)
+                # ==============================================================================
+
                 conditional_dict = {
                     k: (v.to(device) if isinstance(v, torch.Tensor) else v)
                     for k, v in cached_conds[shot_idx].items()
