@@ -142,7 +142,8 @@ class InferenceConfig:
 
         # Misc
         self.prompt_max_chars = None
-        self.shot_num_frames = None  # 新增：每个镜头的独立帧数列表
+        self.shot_num_frames = None
+        self.custom_loras = []
 
         # Apply CLI overrides
         for key, value in cli_overrides.items():
@@ -222,6 +223,8 @@ def load_joyai_engine(args):
         cli_overrides["vae_path"] = args.vae_path
     if args.checkpoint:
         cli_overrides["checkpoint"] = args.checkpoint
+    if hasattr(args, "custom_loras") and args.custom_loras:
+        cli_overrides["custom_loras"] = args.custom_loras
 
     cfg = InferenceConfig(config_path, **cli_overrides)
 
@@ -384,16 +387,29 @@ class InferenceEngine:
         cfg = self.cfg
         print(f"[Stage 2] Loading generator + VAEs from {self._checkpoint}", flush=True)
 
-        loras: tuple[LoraPathStrengthAndSDOps, ...] = ()
+        loras_list = [] 
+        
         if cfg.memory_lora_path and cfg.memory_lora_generator:
-            loras = (
+            loras_list.append(
                 LoraPathStrengthAndSDOps(
                     str(Path(cfg.memory_lora_path).expanduser()),
                     float(cfg.memory_lora_strength),
                     LTXV_LORA_COMFY_RENAMING_MAP,
-                ),
+                )
             )
         
+        if hasattr(cfg, "custom_loras") and cfg.custom_loras:
+            for lora_info in cfg.custom_loras:
+                loras_list.append(
+                    LoraPathStrengthAndSDOps(
+                        str(Path(lora_info["path"]).expanduser()),
+                        float(lora_info["weight"]),
+                        LTXV_LORA_COMFY_RENAMING_MAP,
+                    )
+                )
+
+        loras = tuple(loras_list)
+
         self.generator = create_ltx2_wrapper(
             checkpoint_path=self._checkpoint,
             gemma_path=self._gemma_path,
@@ -419,7 +435,6 @@ class InferenceEngine:
             decoder_device=torch.device("cpu"),
         )
 
-        
         self.video_vae.eval()
         self.audio_vae.eval()
 

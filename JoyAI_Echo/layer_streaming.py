@@ -447,14 +447,17 @@ class LayerStreamingWrapper(nn.Module):
             if not self._store.is_on_gpu(idx):
                 self._store.move_to_gpu(idx, module)
 
+            # --- 修复后的代码开始 ---
             # Record that the compute stream will read these weight tensors.
-            # They were allocated on the prefetch stream, so without this the
-            # caching allocator would allow the prefetch stream to reuse their
-            # memory immediately after eviction — even if the compute kernel
-            # that reads them hasn't finished yet.
+            # 关键修复：仅当 param.data 是 CUDA 张量且拥有有效数据指针时才记录
             compute_stream = torch.cuda.current_stream(self._target_device)
             for param in itertools.chain(module.parameters(), module.buffers()):
-                param.data.record_stream(compute_stream)
+                # 条件1: 确保张量在 CUDA 上
+                # 条件2: 确保张量有实际的物理存储 (data_ptr != 0)
+                # 这将跳过 mmap 的 CPU 视图或 meta 张量
+                if param.data.is_cuda and param.data.data_ptr() != 0:
+                    param.data.record_stream(compute_stream)
+            # --- 修复代码结束 ---
 
             # Kick off prefetch for upcoming layers (wraps around for next pass).
             for offset in range(1, self._prefetch_count + 1):

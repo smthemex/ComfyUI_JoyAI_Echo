@@ -35,19 +35,39 @@ class JoyAI_Echo_SM_Model(io.ComfyNode):
                 io.Combo.Input("gguf",options= ["none"] + folder_paths.get_filename_list("gguf")),
                 io.Combo.Input("vae",options= ["none"] + folder_paths.get_filename_list("vae") ),
                 io.Combo.Input("audio_vae",options= ["none"] + folder_paths.get_filename_list("vae") ),
-                
+                io.Combo.Input("lora_1", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_1_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_2", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_2_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_3", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_3_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_4", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_4_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_5", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_5_weight", default=0, min=0, max=3, step=0.01),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
                 ],
             )
     @classmethod
-    def execute(cls,dit,gguf,vae,audio_vae) -> io.NodeOutput:
+    def execute(cls,dit,gguf,vae,audio_vae,lora_1, lora_1_weight,lora_2, lora_2_weight,lora_3, lora_3_weight,lora_4, lora_4_weight,lora_5, lora_5_weight) -> io.NodeOutput:
         clear_comfyui_cache()
         dit_path=folder_paths.get_full_path("diffusion_models", dit) if dit != "none" else None
         gguf_path=folder_paths.get_full_path("gguf", gguf) if gguf != "none" else None 
         vae_path=folder_paths.get_full_path("vae", vae) if vae != "none" else None
         audio_vae_path=folder_paths.get_full_path("vae", audio_vae) if audio_vae != "none" else None
+
+        custom_loras = []
+        for lora_name, weight in [
+            (lora_1, lora_1_weight), (lora_2, lora_2_weight), 
+            (lora_3, lora_3_weight), (lora_4, lora_4_weight), 
+            (lora_5, lora_5_weight)
+        ]:
+            if lora_name != "none" and weight > 0:
+                lora_path = folder_paths.get_full_path("loras", lora_name)
+                custom_loras.append({"path": lora_path, "weight": float(weight)})
+
         import argparse
         args = argparse.Namespace(
             config=os.path.join(node_joyai_echo_path, "JoyAI_Echo/configs/inference.yaml"),
@@ -59,6 +79,7 @@ class JoyAI_Echo_SM_Model(io.ComfyNode):
             prompts_glob="*.json",
             vae_path=vae_path,
             audio_vae_path=audio_vae_path,
+            custom_loras=custom_loras,
         )
         model= load_joyai_engine(args)
         return io.NodeOutput(model)

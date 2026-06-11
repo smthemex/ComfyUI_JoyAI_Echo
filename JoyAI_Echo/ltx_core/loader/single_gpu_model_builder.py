@@ -240,6 +240,7 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         model_state_dict = self.load_sd(model_paths, sd_ops=self.model_sd_ops, registry=self.registry, device=device, gguf_dit=gguf_dit)
 
         lora_strengths = [lora.strength for lora in self.loras]
+        lora_cpu_device = torch.device("cpu")
         if not lora_strengths or (min(lora_strengths) == 0 and max(lora_strengths) == 0):
             if gguf_dit:
                meta_model= self.set_gguf2meta_model(meta_model,model_state_dict,dtype,device,None)
@@ -256,9 +257,11 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
                 gc.collect()
             return self._return_model(meta_model, device)
 
+        lora_cpu_device = torch.device("cpu")
         lora_state_dicts = [
-            self.load_sd([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=device) for lora in self.loras
+            self.load_sd([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=lora_cpu_device) for lora in self.loras
         ]
+
         lora_sd_and_strengths = [
             LoraStateDictWithStrength(sd, strength)
             for sd, strength in zip(lora_state_dicts, lora_strengths, strict=True)
@@ -284,35 +287,63 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         return self._return_model(meta_model, device)
     
     def build_(self, device: torch.device | None = None, dtype: torch.dtype | None = None) -> ModelType:
-        device = torch.device("cuda") if device is None else device
+        import gc
+        
+        # 1. 准备元模型结构 (Meta Device 不占任何实际内存)
         config = self.model_config()
         meta_model = self.meta_model(config, self.module_ops)
         model_paths = list(self.model_path) if isinstance(self.model_path, tuple) else [self.model_path]
-        model_state_dict = self.load_sd_(model_paths, sd_ops=self.model_sd_ops, registry=self.registry, device=device)
+        
+        # 2. 利用 safetensors 的 mmap 特性，在 CPU 上“零物理内存”加载主模型
+        logger.info("Loading base model via mmap (Zero-Copy CPU)...")
+        model_state_dict = self.load_sd_(
+            model_paths, sd_ops=self.model_sd_ops, registry=self.registry, device=torch.device("cpu")
+        )
 
+        # 3. 检查是否有需要融合的 LoRA
         lora_strengths = [lora.strength for lora in self.loras]
         if not lora_strengths or (min(lora_strengths) == 0 and max(lora_strengths) == 0):
+            logger.info("No active LoRAs. Skipping fusion.")
             sd = model_state_dict.sd
             if dtype is not None:
-                sd = {key: value.to(dtype=dtype) for key, value in model_state_dict.sd.items()}
+                sd = {key: value.to(dtype=dtype) for key, value in sd.items()}
             meta_model.load_state_dict(sd, strict=False, assign=True)
+            del sd
+            # 如果没有 LoRA，直接把模型送往最终的目标设备 (GPU)
             return self._return_model(meta_model, device)
 
+        # 4. 单线程加载 LoRA (同样利用 mmap)
+        logger.info("Loading LoRAs via mmap...")
         lora_state_dicts = [
-            self.load_sd_([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=self.lora_load_device)
+            self.load_sd_([lora.path], sd_ops=lora.sd_ops, registry=self.registry, device=torch.device("cpu"))
             for lora in self.loras
         ]
-        lora_sd_and_strengths = [
-            LoraStateDictWithStrength(sd, strength)
-            for sd, strength in zip(lora_state_dicts, lora_strengths, strict=True)
+
+        # 5. 包装 LoRA 对象
+        gpu_lora_sds = [
+            LoraStateDictWithStrength(lora_sd_obj, strength)
+            for lora_sd_obj, strength in zip(lora_state_dicts, lora_strengths)
         ]
-        final_sd = apply_loras(
+        del lora_state_dicts
+
+        # 6. 在 mmap 映射上直接进行数学运算，不产生额外的内存拷贝
+        logger.info("Fusing model and LoRAs via mmap (Ultra-fast)...")
+        fused_sd = apply_loras(
             model_sd=model_state_dict,
-            lora_sd_and_strengths=lora_sd_and_strengths,
+            lora_sd_and_strengths=gpu_lora_sds,
             dtype=dtype,
-            destination_sd=model_state_dict if isinstance(self.registry, DummyRegistry) else None,
+            destination_sd=None,
         )
-        meta_model.load_state_dict(final_sd.sd, strict=False, assign=True)
+        
+        # 7. 清理临时变量
+        del gpu_lora_sds, model_state_dict
+        gc.collect()
+        
+        # 8. 将融合完毕的干净权重，一次性载入模型并送往 GPU
+        logger.info(f"Transferring fused model to target device: {device}...")
+        meta_model.load_state_dict(fused_sd.sd, strict=False, assign=True)
+        del fused_sd
+        
         return self._return_model(meta_model, device)
 
      
