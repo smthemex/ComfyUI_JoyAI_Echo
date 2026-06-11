@@ -7,6 +7,7 @@ import os
 import folder_paths
 from comfy_api.latest import  io
 import nodes
+import math
 from pathlib import PureWindowsPath
 from .JoyAI_Echo.inference import load_joyai_te,infer_joyai_text,load_joyai_engine,infer_joyai_video
 from .node_utils import clear_comfyui_cache,create_temp_json
@@ -34,19 +35,39 @@ class JoyAI_Echo_SM_Model(io.ComfyNode):
                 io.Combo.Input("gguf",options= ["none"] + folder_paths.get_filename_list("gguf")),
                 io.Combo.Input("vae",options= ["none"] + folder_paths.get_filename_list("vae") ),
                 io.Combo.Input("audio_vae",options= ["none"] + folder_paths.get_filename_list("vae") ),
-                
+                io.Combo.Input("lora_1", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_1_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_2", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_2_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_3", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_3_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_4", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_4_weight", default=0, min=0, max=3, step=0.01),
+                io.Combo.Input("lora_5", options=["none"] + folder_paths.get_filename_list("loras") ),
+                io.Float.Input("lora_5_weight", default=0, min=0, max=3, step=0.01),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
                 ],
             )
     @classmethod
-    def execute(cls,dit,gguf,vae,audio_vae) -> io.NodeOutput:
+    def execute(cls,dit,gguf,vae,audio_vae,lora_1, lora_1_weight,lora_2, lora_2_weight,lora_3, lora_3_weight,lora_4, lora_4_weight,lora_5, lora_5_weight) -> io.NodeOutput:
         clear_comfyui_cache()
         dit_path=folder_paths.get_full_path("diffusion_models", dit) if dit != "none" else None
         gguf_path=folder_paths.get_full_path("gguf", gguf) if gguf != "none" else None 
         vae_path=folder_paths.get_full_path("vae", vae) if vae != "none" else None
         audio_vae_path=folder_paths.get_full_path("vae", audio_vae) if audio_vae != "none" else None
+
+        custom_loras = []
+        for lora_name, weight in [
+            (lora_1, lora_1_weight), (lora_2, lora_2_weight), 
+            (lora_3, lora_3_weight), (lora_4, lora_4_weight), 
+            (lora_5, lora_5_weight)
+        ]:
+            if lora_name != "none" and weight > 0:
+                lora_path = folder_paths.get_full_path("loras", lora_name)
+                custom_loras.append({"path": lora_path, "weight": float(weight)})
+
         import argparse
         args = argparse.Namespace(
             config=os.path.join(node_joyai_echo_path, "JoyAI_Echo/configs/inference.yaml"),
@@ -58,6 +79,7 @@ class JoyAI_Echo_SM_Model(io.ComfyNode):
             prompts_glob="*.json",
             vae_path=vae_path,
             audio_vae_path=audio_vae_path,
+            custom_loras=custom_loras,
         )
         model= load_joyai_engine(args)
         return io.NodeOutput(model)
@@ -75,6 +97,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
                 io.Int.Input("height", default=512, min=256, max=nodes.MAX_RESOLUTION,step=32,display_mode=io.NumberDisplay.number),
                 io.Int.Input("seed", default=0, min=0, max=MAX_SEED,display_mode=io.NumberDisplay.number),
                 io.Int.Input("num_frames", default=121, min=16, max=MAX_SEED,step=1,display_mode=io.NumberDisplay.number),
+                io.String.Input("shot_num_secs", default="", tooltip="example:  2.3, 5.8, 15"),
                 io.Float.Input("frame_rate", default=25.0, min=8.0, max=120.0,step=1.0,display_mode=io.NumberDisplay.number),
                 io.Int.Input("prefetch_count", default=1, min=0, max=48,step=1,display_mode=io.NumberDisplay.number),
                 io.Boolean.Input("enable_tiles", default=False),
@@ -89,7 +112,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
             ],
         )
     @classmethod
-    def execute(cls, model,width,height,seed,num_frames,frame_rate,prefetch_count,enable_tiles,tile_size_in_frames,tile_size_in_pixels,streaming_mode,te_cond=None) -> io.NodeOutput:
+    def execute(cls, model,width,height,seed,num_frames,frame_rate,shot_num_secs,prefetch_count,enable_tiles,tile_size_in_frames,tile_size_in_pixels,streaming_mode,te_cond=None) -> io.NodeOutput:
         clear_comfyui_cache()
         if te_cond is None:
             if not os.path.exists(os.path.join(folder_paths.get_output_directory(),"joy_echo_te_cond.pt")):
@@ -100,6 +123,35 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
         model.streaming_mode=streaming_mode
         model.tile_size_in_frames=tile_size_in_frames
         model.tile_size_in_pixels=tile_size_in_pixels
+
+        # ========== 优化：解析 shot_num_secs，严格去空格并处理无输入情况 ==========
+        shot_frames_list = None
+        # 防御 shot_num_secs 为 None 的情况，并去除整体首尾空格
+        if shot_num_secs is not None and str(shot_num_secs).strip():
+            shot_frames_list = []
+            # 按逗号分割，去除每个元素首尾空格，并过滤空字符串
+            secs_str_list = [s.strip() for s in str(shot_num_secs).split(",") if s.strip()]
+            
+            for s_stripped in secs_str_list:
+                try:
+                    secs = float(s_stripped)
+                except ValueError:
+                    print(f"[JoyAI_Echo_SM_KSampler] Warning: Invalid value '{s_stripped}' in shot_num_secs, skipping.")
+                    continue
+                
+                # 转换公式：(秒数 x frame_rate) 向上取整到 8 的倍数，然后 + 1
+                base_frames = secs * frame_rate
+                base_frames_aligned = math.ceil(base_frames / 8) * 8
+                final_frames = int(base_frames_aligned) + 1
+                shot_frames_list.append(final_frames)
+            
+            # 如果解析后列表为空（例如输入的全是非法字符），则重置为 None
+            if not shot_frames_list:
+                shot_frames_list = None
+            else:
+                print(f"[JoyAI_Echo_SM_KSampler] Parsed shot_num_secs -> shot_frames: {shot_frames_list}")
+        # =======================================================================
+
         cli_overrides = {
             "video_width": width,
             "video_height": height,
@@ -109,10 +161,12 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
             "video_fps": frame_rate,
         }
 
+        # 只有在成功解析出帧数列表时，才传递给 inference
+        if shot_frames_list is not None:
+            cli_overrides["shot_num_frames"] = shot_frames_list
+
         images,audio=infer_joyai_video(model, te_cond,cli_overrides)
-
         return io.NodeOutput(images,audio)
-
 
 class JoyAI_Echo_SM_Clip(io.ComfyNode):
     @classmethod

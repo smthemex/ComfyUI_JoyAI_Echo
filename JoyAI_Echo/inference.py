@@ -142,6 +142,8 @@ class InferenceConfig:
 
         # Misc
         self.prompt_max_chars = None
+        self.shot_num_frames = None
+        self.custom_loras = []
 
         # Apply CLI overrides
         for key, value in cli_overrides.items():
@@ -221,6 +223,8 @@ def load_joyai_engine(args):
         cli_overrides["vae_path"] = args.vae_path
     if args.checkpoint:
         cli_overrides["checkpoint"] = args.checkpoint
+    if hasattr(args, "custom_loras") and args.custom_loras:
+        cli_overrides["custom_loras"] = args.custom_loras
 
     cfg = InferenceConfig(config_path, **cli_overrides)
 
@@ -383,16 +387,29 @@ class InferenceEngine:
         cfg = self.cfg
         print(f"[Stage 2] Loading generator + VAEs from {self._checkpoint}", flush=True)
 
-        loras: tuple[LoraPathStrengthAndSDOps, ...] = ()
+        loras_list = [] 
+        
         if cfg.memory_lora_path and cfg.memory_lora_generator:
-            loras = (
+            loras_list.append(
                 LoraPathStrengthAndSDOps(
                     str(Path(cfg.memory_lora_path).expanduser()),
                     float(cfg.memory_lora_strength),
                     LTXV_LORA_COMFY_RENAMING_MAP,
-                ),
+                )
             )
         
+        if hasattr(cfg, "custom_loras") and cfg.custom_loras:
+            for lora_info in cfg.custom_loras:
+                loras_list.append(
+                    LoraPathStrengthAndSDOps(
+                        str(Path(lora_info["path"]).expanduser()),
+                        float(lora_info["weight"]),
+                        LTXV_LORA_COMFY_RENAMING_MAP,
+                    )
+                )
+
+        loras = tuple(loras_list)
+
         self.generator = create_ltx2_wrapper(
             checkpoint_path=self._checkpoint,
             gemma_path=self._gemma_path,
@@ -418,7 +435,6 @@ class InferenceEngine:
             decoder_device=torch.device("cpu"),
         )
 
-        
         self.video_vae.eval()
         self.audio_vae.eval()
 
@@ -505,6 +521,7 @@ class InferenceEngine:
                 video_width=int(cfg.video_width),
             )
 
+        """
         video_shape, audio_shape = compute_latent_shapes(
             num_frames=int(cfg.num_frames),
             video_height=int(cfg.video_height),
@@ -512,6 +529,7 @@ class InferenceEngine:
             batch_size=1,
             video_fps=float(cfg.video_fps),
         )
+        """
 
         memory_bank = PairedAudioVideoMemoryBank(
             max_size=int(cfg.memory_max_size),
@@ -542,6 +560,26 @@ class InferenceEngine:
         with self._model_ctx(self.generator,self.prefetch_count) as self.generator:
             for shot_idx, prompt in enumerate(prompts):
                 shot_started = time.perf_counter()
+
+                # ========== 优化：计算当前 shot 的 num_frames，支持回退到全局 num_frames ==========
+                # 1. 如果配置了 shot_num_frames 列表，且当前 shot_idx 在列表范围内，则使用独立帧数
+                # 2. 否则（未配置、或列表长度小于 prompt 数量），回退使用全局的 cfg.num_frames
+                if cfg.shot_num_frames and shot_idx < len(cfg.shot_num_frames):
+                    current_num_frames = cfg.shot_num_frames[shot_idx]
+                else:
+                    current_num_frames = int(cfg.num_frames)
+                
+                # 为当前 shot 计算独立的 shape
+                video_shape, audio_shape = compute_latent_shapes(
+                    num_frames=current_num_frames,
+                    video_height=int(cfg.video_height),
+                    video_width=int(cfg.video_width),
+                    batch_size=1,
+                    video_fps=float(cfg.video_fps),
+                )
+                print(f"[Engine] Shot {shot_idx + 1}/{len(prompts)} using num_frames={current_num_frames}", flush=True)
+                # ==============================================================================
+
                 conditional_dict = {
                     k: (v.to(device) if isinstance(v, torch.Tensor) else v)
                     for k, v in cached_conds[shot_idx].items()
