@@ -108,8 +108,7 @@ class VideoVAEWrapper(nn.Module):
         """
         video = self.decode(latent,tiling_config)
         if tiling_config is not None:
-            for result in video:
-                video = result
+            video = torch.cat(list(video), dim=2)
         # Normalize from [-1, 1] to [0, 1]
         video = (video + 1) / 2
         video = video.clamp(0, 1)
