@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import torch
 import torchaudio
-from torchvision.io import write_video
+
 from torchvision.transforms import functional as TVF
 from ..ltx_core.model.video_vae import TilingConfig,SpatialTilingConfig,TemporalTilingConfig
 from .inference.memory_multishot import (
@@ -149,7 +149,9 @@ def write_benchmark_media(
     wrote_with_audio = False
     wrote_sidecar_wav = False
     if audio_waveform is not None:
+        
         try:
+            from torchvision.io import write_video
             write_video(
                 str(output_path),
                 video_uint8,
@@ -163,7 +165,11 @@ def write_benchmark_media(
             print(f"[warn] write_video with audio failed for {output_path}: {exc}; audio_stats={stats}", flush=True)
 
     if not wrote_with_audio:
-        write_video(str(output_path), video_uint8, fps=fps)
+        try:
+            from torchvision.io import write_video
+            write_video(str(output_path), video_uint8, fps=fps)
+        except Exception as exc:
+            print(f"[warn] write_video without audio failed for {output_path}: {exc}; audio_stats={stats}", flush=True)
         if audio_waveform is not None:
             try:
                 import soundfile as sf
