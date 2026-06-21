@@ -155,27 +155,6 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
             #     gc.collect()
 
             if self.load_model == "clip"and first_shard_path.endswith(".gguf") :
-                def adjust_key_name(key):
-                    from packaging import version
-                    import transformers
-                    transformers_version = version.parse(transformers.__version__)
-                    required_version = version.parse('4.57.0')
-                    if "vision_model.embeddings.position_ids" in key or "language_model.embed_tokens.embed_scale" in key:
-                        print(key)
-                    if transformers_version >= required_version:
-                        if "language_model.model." in key:
-                            return 'model.model.language_model.' + key[len('language_model.model.'):]
-                        else:
-                            return 'model.model.' + key
-                    else:
-                        if key.startswith('language_model.model.') :
-                            return 'model.language_model.' + key[len('language_model.model.'):]
-                        elif key.startswith('vision_tower.'):
-                            return 'model.' + key
-                        elif key.startswith('multi_modal_projector.'):
-                            return 'model.' + key
-                        else:
-                            return key
                 #match_state_dict(meta_model, model_state_dict,50)    
                 adjusted_state_dict = {}
                 for key, value in model_state_dict.items():
@@ -221,6 +200,13 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
             else:
                 sd = model_state_dict.sd
                 del model_state_dict
+                # if self.load_model == "clip":
+                #     adjusted_state_dict = {}
+                #     for key, value in sd.items():
+                #         new_key = adjust_key_name(key)
+                #         adjusted_state_dict[new_key] = value
+                #     sd = adjusted_state_dict
+                #     del adjusted_state_dict
                 gc.collect()
                 if dtype is not None  and not gguf_dit :
                     sd = {key: value.to(dtype=dtype) for key, value in sd.items()}
@@ -398,7 +384,28 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         gc.collect()
         return meta_model.to(dtype=dtype)
 
-
+def adjust_key_name(key):
+    from packaging import version
+    import transformers
+    transformers_version = version.parse(transformers.__version__)
+    required_version = version.parse('4.57.0')
+    
+    if "vision_model.embeddings.position_ids" in key or "language_model.embed_tokens.embed_scale" in key:
+        print(key)
+    if transformers_version >= required_version:
+        if "language_model.model." in key:
+            return 'model.model.language_model.' + key[len('language_model.model.'):]
+        else:
+            return 'model.model.' + key
+    else:
+        if key.startswith('language_model.model.') :
+            return 'model.language_model.' + key[len('language_model.model.'):]
+        elif key.startswith('vision_tower.'):
+            return 'model.' + key
+        elif key.startswith('multi_modal_projector.'):
+            return 'model.' + key
+        else:
+            return key
 def load_gguf_checkpoint(gguf_checkpoint_path, sd_ops=None, return_tensors=False):
     """
     Load a GGUF file and return a dictionary of parsed parameters containing tensors, the parsed tokenizer and config

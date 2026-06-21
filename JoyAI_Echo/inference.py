@@ -46,7 +46,7 @@ from .ltx_distillation.utils import (
 )
 from .ltx_core.model.transformer.model import BlockGPUManager
 
-from .utils import streaming_single_model,streaming_prefetch_model,_full_gpu_ctx,streaming_single_te
+from .utils import streaming_single_model,streaming_prefetch_model,_full_gpu_ctx,streaming_single_fast
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "inference.yaml"
 
@@ -170,7 +170,13 @@ def load_joyai_te(gemma_path,connector_path,gemma_root,device, dtype=torch.bfloa
 
 def infer_joyai_text(text_encoder, prompt_files,device):
     if text_encoder.prefetch_count is None:
-        text_encoder.text_encoder.to(device)
+        try:
+            text_encoder.text_encoder.to(device)
+        except Exception as e:
+            print(f"[Stage 1] Failed to move text encoder to {device}: {e}", flush=True)
+            text_encoder.text_encoder.to("cpu")
+            torch.cuda.empty_cache()
+            text_encoder.text_encoder.to(device)
     cached: dict[Path, list[dict[str, Any]]] = {}
 
     for prompts_file in prompt_files:
@@ -356,22 +362,23 @@ class InferenceEngine:
 
     def _model_ctx(self,model,prefetch_count: int | None,) :
         if prefetch_count is not None :
+            layers_attr="model.velocity_model.transformer_blocks"
             if self.streaming_mode=="fast":
-                return streaming_single_te(
+                return streaming_single_fast(
                     model,
-                    layers_attr="model.velocity_model.transformer_blocks",
+                    layers_attr=layers_attr,
                     target_device=torch.device("cuda"),
                 )
             elif self.streaming_mode=="slow":
                     return streaming_single_model(
                         model,
-                        layers_attr="model.velocity_model.transformer_blocks",
+                        layers_attr=layers_attr,
                         target_device=torch.device("cuda"),
                     )
-            elif self.streaming_mode=="prefetch":
+            elif self.streaming_mode=="auto":
                 return streaming_prefetch_model(
                     model,
-                    layers_attr="model.velocity_model.transformer_blocks",
+                    layers_attr=layers_attr,
                     target_device=torch.device("cuda"),
                     prefetch_count=prefetch_count,
                 )
