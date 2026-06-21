@@ -21,7 +21,7 @@ weigths_gguf_current_path = os.path.join(folder_paths.models_dir, "gguf")
 if not os.path.exists(weigths_gguf_current_path):
     os.makedirs(weigths_gguf_current_path)
 folder_paths.add_model_folder_path("gguf", weigths_gguf_current_path) #  gguf dir
-
+joyai_echo_node_instances={}
 
 class JoyAI_Echo_SM_Model(io.ComfyNode):
     @classmethod
@@ -103,7 +103,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
                 io.Boolean.Input("enable_tiles", default=False),
                 io.Int.Input("tile_size_in_frames", default=24, min=16, max=1024,step=8,display_mode=io.NumberDisplay.number),
                 io.Int.Input("tile_size_in_pixels",default=512, min=64, max=4096,step=32,display_mode=io.NumberDisplay.number),
-                io.Combo.Input("streaming_mode",options= ["fast","swap","slow","prefetch"] ),
+                io.Combo.Input("streaming_mode",options= ["fast","swap","slow","auto"] ),
                 io.Conditioning.Input("te_cond",optional=True),
             ], 
             outputs=[
@@ -211,6 +211,7 @@ class JoyAI_Echo_SM_Encoder(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(display_name="te_cond"),
                 ],
+
             )
     @classmethod
     def execute(cls,clip,prefetch_count,enable_streaming,prompt,prompt_files) -> io.NodeOutput:
@@ -218,6 +219,9 @@ class JoyAI_Echo_SM_Encoder(io.ComfyNode):
         prefetch_count=prefetch_count if prefetch_count > 0 else None
         clip.prefetch_count= prefetch_count
         clip.enable_streaming=enable_streaming
+       
+       
+        print(f"prompt_files is : {prompt_files}")
         if not prompt_files:
             if prompt:
                 prompt_files=create_temp_json(prompt)
@@ -225,10 +229,37 @@ class JoyAI_Echo_SM_Encoder(io.ComfyNode):
                 raise Exception("No prompt or prompt_files")
         else:
             prompt_files=PureWindowsPath(prompt_files).as_posix()
-            prompt_files=[prompt_files]      
+            prompt_files=[prompt_files] 
+        te_cond=prompt_files
+
         te_cond=infer_joyai_text(clip,prompt_files,device)
         torch.save(te_cond,os.path.join(folder_paths.get_output_directory(),"joy_echo_te_cond.pt"))
         return io.NodeOutput(te_cond)
+    
+from aiohttp import web
+from server import PromptServer
+import base64
 
 
+@PromptServer.instance.routes.post("/joyai_echo/get_file_path")
+async def get_file_path(request):
+    try:
+        data = await request.json()
+        filename = data.get('filename', 'temp.json')
+        content_base64 = data.get('content', '')
+        if not content_base64:
+            return web.json_response({"error": "No file content provided"}, status=400)
+        file_content = base64.b64decode(content_base64)
+        temp_dir = os.path.join(folder_paths.get_temp_directory(), "joyai_temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = os.path.join(temp_dir, filename)
+        
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+        print(f"File saved to: {file_path}")
+
+        return web.json_response({"path": file_path})
+    except Exception as e:
+        print(f"Error in get_file_path: {str(e)}")
+        return web.json_response({"error": str(e)}, status=500)
 

@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 
 from ...ltx_core.loader.registry import Registry
-from ...utils import streaming_single_te,streaming_prefetch_model,_full_gpu_ctx
+from ...utils import streaming_single_fast,streaming_prefetch_model,_full_gpu_ctx
 
 class GemmaTextEncoderWrapper(nn.Module):
     """
@@ -48,16 +48,17 @@ class GemmaTextEncoderWrapper(nn.Module):
 
     def _model_ctx(self,model,prefetch_count: int | None,) :
         if prefetch_count is not None:
+            layers_attr="model.model.language_model.layers"
             if not self.enable_streaming:
-                return streaming_single_te(
+                return streaming_single_fast(
                     model,
-                    layers_attr="model.model.language_model.layers",
+                    layers_attr=layers_attr,
                     target_device=torch.device("cuda"),
                 )
             else:
                 return streaming_prefetch_model(
                     model,
-                    layers_attr="model.model.language_model.layers",
+                    layers_attr=layers_attr,
                     target_device=torch.device("cuda"),
                     prefetch_count=prefetch_count,
                 )

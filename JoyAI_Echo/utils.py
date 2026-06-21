@@ -1,7 +1,7 @@
-from diffusers.quantizers.gguf.utils import dequantize_gguf_tensor
+
 
 from contextlib import contextmanager
-from .layer_streaming import SimpleLayerStreamingWrapper,LayerStreamingWrapper,SimpleLayerTEWrapper
+from .layer_streaming import SimpleLayerStreamingWrapper,LayerStreamingWrapper,SimpleLayerFastWrapper
 from collections.abc import Iterator
 from typing import TypeVar
 import gc
@@ -60,13 +60,13 @@ def streaming_single_model(
             print("Host empty cache cleanup failed; ignoring.", exc_info=True)
 
 @contextmanager
-def streaming_single_te(
+def streaming_single_fast(
     model: _M,  # 模型参数，类型为_M
     layers_attr: str,  # 属性字符串，用于指定模型中的层
     target_device: torch.device,  # 目标设备，用于指定模型运行在哪个设备上
 ) -> Iterator[_M]:
     """Wrap *model* with :class:`LayerStreamingWrapper`, yield it, then tear down."""
-    wrapped = SimpleLayerTEWrapper(
+    wrapped = SimpleLayerFastWrapper(
         model,
         layers_attr=layers_attr,
         target_device=target_device,
@@ -105,8 +105,8 @@ def streaming_prefetch_model(
     try:
         yield wrapped  # type: ignore[misc]
     finally:
-        # if hasattr(wrapped, 'teardown'):
-        #     wrapped.teardown()
+        if hasattr(wrapped, 'teardown'):
+            wrapped.teardown()
         wrapped.to("cpu")
         cleanup_memory()
         # Flush the host (pinned) memory cache so that freed pinned pages are
@@ -259,6 +259,7 @@ def apply_loras_gguf(
     lora_sd,
 ):
     sd = {}
+    from diffusers.quantizers.gguf.utils import dequantize_gguf_tensor
     for key, weight in model_sd.items():
         if weight is None:
             continue

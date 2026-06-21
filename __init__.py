@@ -3,6 +3,9 @@ from comfy_api.latest import ComfyExtension,io
 from typing_extensions import override
 
 from .JoyAI_Echo_node import JoyAI_Echo_SM_Model, JoyAI_Echo_SM_Clip, JoyAI_Echo_SM_Encoder, JoyAI_Echo_SM_KSampler
+
+WEB_DIRECTORY = "./js"
+
 class  JoyAI_Echo_SM_Extension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
