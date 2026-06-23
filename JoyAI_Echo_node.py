@@ -104,7 +104,10 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
                 io.Int.Input("tile_size_in_frames", default=24, min=16, max=1024,step=8,display_mode=io.NumberDisplay.number),
                 io.Int.Input("tile_size_in_pixels",default=512, min=64, max=4096,step=32,display_mode=io.NumberDisplay.number),
                 io.Combo.Input("streaming_mode",options= ["fast","swap","slow","auto"] ),
+                io.Combo.Input("audio_memory_mode",options= ["center","max_response", "random"] ),
+                io.Combo.Input("video_memory_mode",options= ["center","first", "random",] ),
                 io.Conditioning.Input("te_cond",optional=True),
+                io.Video.Input("first_video",optional=True),
             ], 
             outputs=[
                 io.Image.Output(display_name="images"),
@@ -112,7 +115,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
             ],
         )
     @classmethod
-    def execute(cls, model,width,height,seed,num_frames,frame_rate,shot_num_secs,prefetch_count,enable_tiles,tile_size_in_frames,tile_size_in_pixels,streaming_mode,te_cond=None) -> io.NodeOutput:
+    def execute(cls, model,width,height,seed,num_frames,frame_rate,shot_num_secs,prefetch_count,enable_tiles,tile_size_in_frames,tile_size_in_pixels,streaming_mode,audio_memory_mode, video_memory_mode,te_cond=None,first_video=None) -> io.NodeOutput:
         clear_comfyui_cache()
         if te_cond is None:
             if not os.path.exists(os.path.join(folder_paths.get_output_directory(),"joy_echo_te_cond.pt")):
@@ -123,6 +126,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
         model.streaming_mode=streaming_mode
         model.tile_size_in_frames=tile_size_in_frames
         model.tile_size_in_pixels=tile_size_in_pixels
+        
 
         # ========== 优化：解析 shot_num_secs，严格去空格并处理无输入情况 ==========
         shot_frames_list = None
@@ -165,7 +169,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
         if shot_frames_list is not None:
             cli_overrides["shot_num_frames"] = shot_frames_list
 
-        images,audio=infer_joyai_video(model, te_cond,cli_overrides)
+        images,audio=infer_joyai_video(model, te_cond,cli_overrides,first_video,audio_memory_mode, video_memory_mode)
         return io.NodeOutput(images,audio)
 
 class JoyAI_Echo_SM_Clip(io.ComfyNode):
@@ -219,8 +223,7 @@ class JoyAI_Echo_SM_Encoder(io.ComfyNode):
         prefetch_count=prefetch_count if prefetch_count > 0 else None
         clip.prefetch_count= prefetch_count
         clip.enable_streaming=enable_streaming
-       
-       
+
         print(f"prompt_files is : {prompt_files}")
         if not prompt_files:
             if prompt:
@@ -250,7 +253,7 @@ async def get_file_path(request):
         if not content_base64:
             return web.json_response({"error": "No file content provided"}, status=400)
         file_content = base64.b64decode(content_base64)
-        temp_dir = os.path.join(folder_paths.get_temp_directory(), "joyai_temp")
+        temp_dir = os.path.join(folder_paths.get_output_directory(), "joyai_temp")
         os.makedirs(temp_dir, exist_ok=True)
         file_path = os.path.join(temp_dir, filename)
         

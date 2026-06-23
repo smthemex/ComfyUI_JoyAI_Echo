@@ -12,6 +12,7 @@ import folder_paths
 import soundfile as sf
 import uuid
 import json
+from comfy_api.latest import  Types
 cur_path = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -25,6 +26,7 @@ def create_temp_json(prompts):
     with open(temp_path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(data, ensure_ascii=False) + "\n")     
     return [temp_path]
+
 
 
 def audio2path(audio,):
