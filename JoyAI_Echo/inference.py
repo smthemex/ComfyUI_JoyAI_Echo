@@ -1,8 +1,8 @@
 """Unified inference entrypoint: load models once, process all prompt files."""
 
 from __future__ import annotations
-
-import json
+import cv2
+import librosa
 import soundfile as sf
 import time
 from datetime import datetime
@@ -16,11 +16,15 @@ from tqdm import tqdm
 #     _p = str(_REPO_ROOT / _subpath)
 #     if _p not in sys.path:
 #         sys.path.insert(0, _p)
+from comfy_api.latest._input.video_types  import  VideoCodec, VideoComponents
 
+from PIL import Image
 import torch
-#import torchaudio
+import os
 import yaml
-
+from comfy_api.latest import  Types,InputImpl
+import numpy as np
+from comfy.utils import common_upscale
 from .ltx_core.loader import LTXV_LORA_COMFY_RENAMING_MAP, LoraPathStrengthAndSDOps
 # from .ltx_distillation.inference.bidirectional_pipeline import BidirectionalAVInferencePipeline
 # from .ltx_distillation.inference.memory_bidirectional_pipeline import BidirectionalMemoryAVInferencePipeline
@@ -29,7 +33,7 @@ from .ltx_distillation.inference.memory_multishot import (
     audio_waveform_stats,
     build_paired_audio_memory_kwargs,
     load_multishot_prompts,
-    video_uint8_to_pil_frames,
+    video_uint8_to_pil_frames,normalize_audio_waveform_for_media
 )
 from .ltx_distillation.models.ltx_wrapper import create_ltx2_wrapper
 from .ltx_distillation.models.text_encoder_wrapper import create_text_encoder_wrapper
@@ -44,12 +48,70 @@ from .ltx_distillation.utils import (
     save_memory_bank_frames,
     write_benchmark_media,
 )
+
 from .ltx_core.model.transformer.model import BlockGPUManager
 
 from .utils import streaming_single_model,streaming_prefetch_model,_full_gpu_ctx,streaming_single_fast
+
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "inference.yaml"
 
+def tensor2image(tensor):
+    tensor = tensor.cpu()
+    image_np = tensor.squeeze().mul(255).clamp(0, 255).byte().numpy()
+    image = Image.fromarray(image_np, mode='RGB')
+    return image
+
+def tensor_upscale(tensor, width, height):
+    samples = tensor.movedim(-1, 1)
+    samples = common_upscale(samples, width, height, "bilinear", "center")
+    samples = samples.movedim(1, -1)
+    return samples
+
+def nomarl_upscale(img, width, height):
+    samples = img.movedim(-1, 1)
+    img = common_upscale(samples, width, height, "bilinear", "center")
+    samples = img.movedim(1, -1)
+    img = tensor2image(samples)
+    return img
+
+def tensor2pillist(tensor_in):
+    d1, _, _, _ = tensor_in.size()
+    if d1 == 1:
+        img_list = [tensor2image(tensor_in)]
+    else:
+        tensor_list = torch.chunk(tensor_in, chunks=d1)
+        img_list=[tensor2image(i) for i in tensor_list]
+    return img_list
+
+def re_save_video_dir(video,video_dir,cli_overrides,formats="mp4",codec=VideoCodec.H264):
+    output_path=os.path.join(video_dir, "shot_000.mp4")
+    os.makedirs(video_dir, exist_ok=True)
+    #video_fps=videos.get_components().frame_rate # 输入fps不匹配暂不处理
+    images=video.get_components().images
+    images=tensor_upscale(images,cli_overrides["video_width"],cli_overrides["video_height"])
+    new_components = VideoComponents(
+        images=images,
+        frame_rate=video.get_components().frame_rate,
+        audio=video.get_components().audio,
+       
+    )
+    new_video = InputImpl.VideoFromComponents(new_components)
+    
+    new_video.save_to(
+        output_path,
+        format=Types.VideoContainer(formats),
+        codec=codec,
+        metadata=None
+    )
+    img=images[-1].unsqueeze(0) #获取最后一帧
+    img=tensor2image(img)
+    memory_dir = os.path.join(video_dir, "memory_bank", "shot_000")
+    os.makedirs(memory_dir, exist_ok=True)
+    img.save(os.path.join(memory_dir, "memory_000.jpg"))
+    return new_video
+ 
+    
 
 def _load_yaml_config(config_path: Path) -> dict[str, Any]:
     with open(config_path, "r", encoding="utf-8") as f:
@@ -242,7 +304,7 @@ def load_joyai_engine(args):
 
 
 
-def infer_joyai_video(engine, cached,cli_overrides):
+def infer_joyai_video(engine, cached,cli_overrides,first_video=None,audio_memory_mode="center",video_memory_mode="center",):
     print(f"[Stage 3] Infer video...")
     #cached_per_file = engine.encode_all_prompts(prompt_files)
     cfg= engine.cfg
@@ -251,7 +313,7 @@ def infer_joyai_video(engine, cached,cli_overrides):
             setattr(cfg, key, value)    
     
     # Stage 3: run inference for each file using the pre-encoded prompts.
-    output_root = Path(engine.cfg.output_root) / "outputs"
+    output_root = Path(engine.cfg.output_root) / "video"
     # #for prompts_file in prompt_files:
     # cached = cached_per_file.get(prompts_file, [])
     # if not cached:
@@ -260,18 +322,20 @@ def infer_joyai_video(engine, cached,cli_overrides):
     final_video=[]
     final_audio=[]
     sample_rate=48000
+     
+        
     for prompts_file,cached in cached.items():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_output_dir = output_root / f"inference_{timestamp}"
         print("cached video and files save to :",run_output_dir)
-        video,audio=engine.run_prompt_file(prompts_file, run_output_dir, cached)
+        video,audio=engine.run_prompt_file(prompts_file, run_output_dir, cached,first_video,audio_memory_mode, video_memory_mode)
         final_video.append(video)
         final_audio.append(audio["waveform"])
         sample_rate=audio["sample_rate"]
 
     print(f"[Inference] All {len(cached)} prompt file(s) processed.", flush=True)
-    print(f"{final_audio[0].shape}") 
-    print(f"{final_video[0].shape}")
+    # print(f"{final_audio[0].shape}") 
+    # print(f"{final_video[0].shape}")
     return  torch.cat(final_video,dim=0), {"waveform": torch.cat(final_audio,dim=-1), "sample_rate": sample_rate}
 
 
@@ -450,11 +514,12 @@ class InferenceEngine:
 
 
         self.audio_sample_rate = self.audio_vae.get_output_sample_rate() or 24000
-        print(f"[Stage 2] Generator + VAEs ready.", flush=True)
+        print(f"[Stage 2] Generator + VAEs ready + audio_sample_rate={self.audio_sample_rate}", flush=True)
 
     # ------------------------------------------------------------------
     # Module hot-swap helpers
     # ------------------------------------------------------------------
+   
 
     @staticmethod
     def _move(module, target_device) -> None:
@@ -494,13 +559,27 @@ class InferenceEngine:
         self._move(self.audio_vae.decoder, self.device)
         self._move(self.audio_vae.vocoder, self.device)
 
+    def _stage_for_audio_encode(self) -> None:
+        """Generator off GPU; VAE decoders + vocoder on GPU."""
+
+        self._empty()
+        #self._move(self.video_vae.decoder, self.device)
+        self._move(self.audio_vae.encoder, self.device)
+
+
+
     def run_prompt_file(
         self,
         prompts_file: Path,
         output_dir: Path,
         cached_conds: list[dict[str, Any]],
+        first_video: str | None = None,
+        audio_memory_mode="center",
+        video_memory_mode="center",
 
     ) -> None:
+        
+ 
         """Run multishot inference for a single prompt file using pre-encoded prompts."""
         if self.generator is None:
             raise RuntimeError("call load_generator() before run_prompt_file()")
@@ -543,29 +622,30 @@ class InferenceEngine:
             save_mode=str(cfg.save_mode),
             num_fix_frames=int(cfg.num_fix_frames),
         )
-
+       
         shot_paths: list[Path] = []
         shot_audios: list[torch.Tensor] = []
         shot_videos=[]
-        metadata: dict[str, Any] = {
-            "checkpoint": cfg.checkpoint,
-            "prompts_file": str(prompts_file),
-            "output_dir": str(output_dir),
-            "denoising_steps": [int(x) for x in cfg.denoising_steps],
-            "denoising_sigmas": [float(x) for x in cfg.denoising_sigmas],
-            "num_prompts": len(prompts),
-            "save_mode": cfg.save_mode,
-            "memory_max_size": cfg.memory_max_size,
-            "num_fix_frames": cfg.num_fix_frames,
-            "enable_audio_memory": cfg.enable_audio_memory,
-            "shots": [],
-        }
+        # metadata: dict[str, Any] = {
+        #     "checkpoint": cfg.checkpoint,
+        #     "prompts_file": str(prompts_file),
+        #     "output_dir": str(output_dir),
+        #     "denoising_steps": [int(x) for x in cfg.denoising_steps],
+        #     "denoising_sigmas": [float(x) for x in cfg.denoising_sigmas],
+        #     "num_prompts": len(prompts),
+        #     "save_mode": cfg.save_mode,
+        #     "memory_max_size": cfg.memory_max_size,
+        #     "num_fix_frames": cfg.num_fix_frames,
+        #     "enable_audio_memory": cfg.enable_audio_memory,
+        #     "shots": [],
+        # }
 
         run_started = time.perf_counter()
         shot_durations: list[dict[str, float]] = []
-        #print(self.prefetch_count)
+        
         with self._model_ctx(self.generator,self.prefetch_count) as self.generator:
             for shot_idx, prompt in enumerate(prompts):
+                
                 shot_started = time.perf_counter()
 
                 # ========== 优化：计算当前 shot 的 num_frames，支持回退到全局 num_frames ==========
@@ -614,6 +694,7 @@ class InferenceEngine:
                         torch.cuda.manual_seed(prompt_seed)
                     #video_latent=torch.load("D:\\Downloads\\joy_echo_lt_cond.pt")
                     if len(memory_bank) > 0:
+                        print("[Engine] Using memory bank")
                         # Briefly bring video encoder onto GPU.
                         self._stage_for_video_encode()
                         memory_video = encode_memory_frames_batch(
@@ -643,43 +724,109 @@ class InferenceEngine:
                             **memory_audio_kwargs,
                         )
                     else:
-                        video_latent, audio_latent = self.generator.generate_BidirectionalAV(
-                            video_shape=tuple(video_shape),
-                            audio_shape=tuple(audio_shape),
-                            conditional_dict=conditional_dict,
-                            seed=prompt_seed,
-                        )
+                        if first_video is not None and shot_idx == 0 :
+                            print(f"[Engine] Skipping shot {shot_idx+1 }/{len(prompts)} due to first video is not None", flush=True)
+
+                        else:
+                            print(f"[Engine] Generating shot {shot_idx + 1}/{len(prompts)}")
+                            video_latent, audio_latent = self.generator.generate_BidirectionalAV(
+                                video_shape=tuple(video_shape),
+                                audio_shape=tuple(audio_shape),
+                                conditional_dict=conditional_dict,
+                                seed=prompt_seed,
+                            )
                 if device.type == "cuda":
                     torch.cuda.synchronize()
                 denoise_elapsed = time.perf_counter() - denoise_started
 
                 # Release intermediates that are no longer needed before the heavy
                 # decoder swap-in.
-                del conditional_dict, memory_video, memory_audio_kwargs
+                if  first_video is  None :
+                    del conditional_dict, memory_video, memory_audio_kwargs
                 memory_video = None
                 memory_audio_kwargs = {}
-
-                # Phase B: decode — generator off GPU, decoders + vocoder on GPU.
-                self._stage_for_decode()
-
                 decode_started = time.perf_counter()
+                # use input video to skip the first frame
+                if first_video is not None and shot_idx == 0 :
+                    images=first_video.get_components().images
+                    images=tensor_upscale(images,int(cfg.video_width),int(cfg.video_height))
+                    video_uint8 = (images.clamp(0, 1) * 255).cpu().to(torch.uint8).contiguous()
+                    memory_frames_for_bank=tensor2pillist(images)
+                    shot_videos.append(images.cpu().float() )
+                    self._stage_for_audio_encode()
+                    audio_waveform=first_video.get_components().audio["waveform"]
+                    original_sample_rate = int(first_video.get_components().audio["sample_rate"])
+                    orig_duration = audio_waveform.shape[-1] / original_sample_rate
+                   
+                    print(f"first video's audio sample rate: {original_sample_rate}")
+                    target_sample_rate = 16000
+                    
+                    if original_sample_rate != target_sample_rate: # 解码音频需要的采样率16000
+                        print(f"Resampling audio from {original_sample_rate} to {target_sample_rate}")
+                        target_samples = int(round(orig_duration * target_sample_rate))
+                        speech_array = audio_waveform.squeeze().cpu().float().numpy()
+                        speech_array = librosa.resample(speech_array, orig_sr=original_sample_rate, target_sr=target_sample_rate)
+                        #print(speech_array.shape)
+                        if len(speech_array) > target_samples:
+                            speech_array = speech_array[:target_samples]
+                        else:
+                            # 如果重采样后长度不足，用最后一个样本填充
+                            pad_length = target_samples - len(speech_array)
+                            speech_array = np.pad(speech_array, (0, pad_length), mode='edge') 
 
-                audio_memory_latent = (
-                    audio_latent.detach().cpu().contiguous()
-                    if (cfg.enable_audio_memory and audio_latent is not None)
-                    else None
-                )
+                        infer_audio_waveform = torch.tensor(speech_array).unsqueeze(0).to(device)
+                        infer_audio_waveform=normalize_audio_waveform_for_media(infer_audio_waveform)
+                    else:
+                        infer_audio_waveform=normalize_audio_waveform_for_media(audio_waveform)
 
-                video_uint8, audio_waveform = decode_benchmark_sample(
-                    self.video_vae, self.audio_vae, video_latent, audio_latent,self.enable_tiles,self.tile_size_in_frames,self.tile_size_in_pixels
-                )
-               
+                    if original_sample_rate!=self.audio_sample_rate: # 生成音频需要的采样率48000
+                        print(f"Resampling audio from {original_sample_rate} to {self.audio_sample_rate}")
+                        target_samples = int(round(orig_duration * self.audio_sample_rate))
+                        speech_array = audio_waveform.squeeze().cpu().float().numpy()
+                        speech_array = librosa.resample(speech_array, orig_sr=original_sample_rate, target_sr=self.audio_sample_rate)
+                        #print(speech_array.shape)
+                        if len(speech_array) > target_samples:
+                            speech_array = speech_array[:target_samples]
+                        else:
+                            # 如果重采样后长度不足，用最后一个样本填充
+                            pad_length = target_samples - len(speech_array)
+                            speech_array = np.pad(speech_array, (0, pad_length), mode='edge') 
+                        audio_waveform = torch.tensor(speech_array).unsqueeze(0).to(device)
+                        audio_waveform=normalize_audio_waveform_for_media(audio_waveform)
+                    else:
+                        audio_waveform=normalize_audio_waveform_for_media(audio_waveform)
+
+
+                    #print(audio_waveform.shape) #torch.Size([2, 480000])
+                    audio_memory_latent = (
+                        self.audio_vae.encode(infer_audio_waveform,int(target_sample_rate)).detach().cpu().contiguous()
+                        if cfg.enable_audio_memory else None
+                    ) 
+                    #print(audio_memory_latent.shape) #torch.Size([1, 254, 128])
+                else:
+                    # Phase B: decode — generator off GPU, decoders + vocoder on GPU.
+                    self._stage_for_decode()
+
+                    audio_memory_latent = (
+                        audio_latent.detach().cpu().contiguous()
+                        if (cfg.enable_audio_memory and audio_latent is not None)
+                        else None
+                    )
+
+                    video_uint8, audio_waveform = decode_benchmark_sample(
+                        self.video_vae, self.audio_vae, video_latent, audio_latent,self.enable_tiles,self.tile_size_in_frames,self.tile_size_in_pixels
+                    )
+                    #print(audio_waveform.shape)
+                    memory_frames_for_bank = video_uint8_to_pil_frames(video_uint8)
+                    shot_videos.append(video_uint8.cpu().float() / 255.0)  
+
                 if device.type == "cuda":
                     torch.cuda.synchronize()
                 decode_elapsed = time.perf_counter() - decode_started
-                memory_frames_for_bank = video_uint8_to_pil_frames(video_uint8)
-                shot_videos.append(video_uint8.cpu().float() / 255.0)      #[F, H, W, C]
+                
+                    #[F, H, W, C]
                 new_memory_metadata: dict[str, Any] = {}
+                #print(cfg.audio_memory_sample_rate,"audio memory sample rate") #16000
                 if audio_memory_latent is not None:
                     new_memory_metadata = memory_bank.save_memory_slot(
                         memory_frames_for_bank,
@@ -689,8 +836,8 @@ class InferenceEngine:
                         audio_waveform=audio_waveform,
                         audio_sample_rate=int(cfg.audio_memory_sample_rate),
                         video_fps=float(cfg.video_fps),
-                        audio_window_selection_mode=str(cfg.audio_memory_window_selection_mode),
-                        video_frame_selection_mode=str(cfg.video_memory_frame_selection_mode),
+                        audio_window_selection_mode=audio_memory_mode,
+                        video_frame_selection_mode=video_memory_mode,
                         audio_memory_mel_bins=int(cfg.audio_memory_mel_bins),
                         audio_memory_mel_hop_length=int(cfg.audio_memory_mel_hop_length),
                         audio_memory_n_fft=int(cfg.audio_memory_n_fft),
@@ -709,7 +856,7 @@ class InferenceEngine:
                     video_uint8=video_uint8,
                     audio_waveform=audio_waveform,
                     fps=int(cfg.video_fps),
-                    audio_sr=int(self.audio_sample_rate),
+                    audio_sr=self.audio_sample_rate,
                 )
                 shot_paths.append(shot_path)
                 if audio_waveform is not None:
@@ -723,22 +870,22 @@ class InferenceEngine:
                 }
                 shot_durations.append(timing)
 
-                metadata["shots"].append(
-                    {
-                        "shot_idx": int(shot_idx),
-                        "prompt": prompt,
-                        "output_path": str(shot_path),
-                        "memory_size_before": int(memory_size_before),
-                        "memory_size_after": int(len(memory_bank)),
-                        "new_memory_entry": new_memory_metadata,
-                        "audio_latent_shape": list(audio_latent.shape) if audio_latent is not None else None,
-                        "wrote_audio_in_mp4": bool(write_result["wrote_audio_in_mp4"]),
-                        "wrote_sidecar_wav": bool(write_result["wrote_sidecar_wav"]),
-                        "audio_stats": write_result["audio_stats"],
-                        "memory_entries": memory_bank.get_memory_metadata(),
-                        "timing": timing,
-                    }
-                )
+                # metadata["shots"].append(
+                #     {
+                #         "shot_idx": int(shot_idx),
+                #         "prompt": prompt,
+                #         "output_path": str(shot_path),
+                #         "memory_size_before": int(memory_size_before),
+                #         "memory_size_after": int(len(memory_bank)),
+                #         "new_memory_entry": new_memory_metadata,
+                #         "audio_latent_shape": list(audio_latent.shape) if audio_latent is not None else None,
+                #         "wrote_audio_in_mp4": bool(write_result["wrote_audio_in_mp4"]),
+                #         "wrote_sidecar_wav": bool(write_result["wrote_sidecar_wav"]),
+                #         "audio_stats": write_result["audio_stats"],
+                #         "memory_entries": memory_bank.get_memory_metadata(),
+                #         "timing": timing,
+                #     }
+                # )
 
                 print(
                     f"[Engine] shot={shot_idx + 1}/{len(prompts)} done "
@@ -746,8 +893,9 @@ class InferenceEngine:
                     f"total={shot_elapsed:.1f}s",
                     flush=True,
                 )
-
-                del video_latent, audio_latent, video_uint8, audio_waveform
+                if first_video is  None  :
+                    del video_latent, audio_latent, 
+                del  video_uint8, audio_waveform
                 del audio_memory_latent, memory_frames_for_bank
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
@@ -756,12 +904,12 @@ class InferenceEngine:
             avg_total = sum(t["total_sec"] for t in shot_durations) / max(len(shot_durations), 1)
             avg_denoise = sum(t["denoise_sec"] for t in shot_durations) / max(len(shot_durations), 1)
             avg_decode = sum(t["decode_sec"] for t in shot_durations) / max(len(shot_durations), 1)
-            metadata["timing"] = {
-                "run_total_sec": round(run_elapsed, 3),
-                "avg_shot_total_sec": round(avg_total, 3),
-                "avg_denoise_sec": round(avg_denoise, 3),
-                "avg_decode_sec": round(avg_decode, 3),
-            }
+            # metadata["timing"] = {
+            #     "run_total_sec": round(run_elapsed, 3),
+            #     "avg_shot_total_sec": round(avg_total, 3),
+            #     "avg_denoise_sec": round(avg_denoise, 3),
+            #     "avg_decode_sec": round(avg_decode, 3),
+            # }
             print(
                 f"[Engine] {prompts_file.name} run_total={run_elapsed:.1f}s "
                 f"avg_shot={avg_total:.1f}s (denoise={avg_denoise:.1f}s decode={avg_decode:.1f}s)",
@@ -784,105 +932,16 @@ class InferenceEngine:
                 elif audio_np.ndim == 1:
                     pass # 单声道直接保存
                 sf.write(str(combined_audio_path), audio_np, int(self.audio_sample_rate))
-            metadata["combined_path"] = str(combined_path)
-            metadata["combined_audio_path"] = str(combined_audio_path) if combined_audio_path else None
-            metadata["combined_audio_stats"] = audio_waveform_stats(combined_audio)
-            metadata_path = output_dir / "run_metadata.json"
-            metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            # metadata["combined_path"] = str(combined_path)
+            # metadata["combined_audio_path"] = str(combined_audio_path) if combined_audio_path else None
+            # metadata["combined_audio_stats"] = audio_waveform_stats(combined_audio)
+            # metadata_path = output_dir / "run_metadata.json"
+            # metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
             print(f"[Engine] Done: {prompts_file.name} -> {combined_path}", flush=True)
         # print(shot_videos[0].shape) #torch.Size([121, 512, 768, 3])
         # print(combined_audio.shape) #torch.Size([2, 230880])
-        # print(self.audio_sample_rate) #48000
+        #print(self.audio_sample_rate,123) #48000
         return torch.cat(shot_videos,dim=0), {"waveform": combined_audio.unsqueeze(0), "sample_rate": int(self.audio_sample_rate)}
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
-
-def parse_args():
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Unified inference: load models once, process all prompt files.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("--config", type=str, default=str(DEFAULT_CONFIG), help="Path to YAML config file")
-    parser.add_argument("--prompts-dir", type=str, default=None, help="Override prompts directory")
-    parser.add_argument("--prompts-glob", type=str, default=None, help="Override prompts glob pattern")
-    parser.add_argument("--output-root", type=str, default=None, help="Override output root directory")
-    parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--num-frames", type=int, default=None)
-    parser.add_argument("--video-height", type=int, default=None)
-    parser.add_argument("--video-width", type=int, default=None)
-    parser.add_argument("--video-fps", type=int, default=None)
-    parser.add_argument("--v2a-grad-scale", type=float, default=None)
-    parser.add_argument("--memory-max-size", type=int, default=None)
-    parser.add_argument("--num-fix-frames", type=int, default=None)
-    parser.add_argument("--enable-audio-memory", type=str_to_bool, default=None)
-    return parser.parse_args()
-
-
-# def main() -> None:
-#     args = parse_args()
-
-#     config_path = Path(args.config).expanduser().resolve()
-#     if not config_path.exists():
-#         raise FileNotFoundError(f"Config file not found: {config_path}")
-
-#     cli_overrides = {}
-#     for key in ["seed", "num_frames", "video_height", "video_width", "video_fps",
-#                 "v2a_grad_scale", "memory_max_size", "num_fix_frames", "enable_audio_memory"]:
-#         val = getattr(args, key, None)
-#         if val is not None:
-#             cli_overrides[key] = val
-#     if args.prompts_dir:
-#         cli_overrides["prompts_dir"] = str(Path(args.prompts_dir).expanduser().resolve())
-#     if args.prompts_glob:
-#         cli_overrides["prompts_glob"] = args.prompts_glob
-#     if args.output_root:
-#         cli_overrides["output_root"] = str(Path(args.output_root).expanduser().resolve())
-
-#     cfg = InferenceConfig(config_path, **cli_overrides)
-
-#     if len(cfg.denoising_steps) != len(cfg.denoising_sigmas):
-#         raise ValueError("denoising steps and sigmas must have the same length")
-
-#     engine = InferenceEngine(cfg)
-
-#     # Discover prompt files
-#     prompts_dir = Path(cfg.prompts_dir)
-#     prompts_pattern = cfg.prompts_glob
-#     if not prompts_pattern.startswith("/"):
-#         prompt_files = sorted(prompts_dir.glob(prompts_pattern))
-#     else:
-#         prompt_files = sorted(Path(p) for p in glob(prompts_pattern))
-
-#     if not prompt_files:
-#         raise FileNotFoundError(f"No prompt files matched: {prompts_dir / prompts_pattern}")
-
-#     print(f"[Inference] Found {len(prompt_files)} prompt file(s)", flush=True)
-
-#     # Stage 1: encode all prompts across all files, then release text encoder.
-#     cached_per_file = engine.encode_all_prompts(prompt_files)
-
-#     # Stage 2: now load the generator + VAEs.
-#     engine.load_generator()
-
-#     # Stage 3: run inference for each file using the pre-encoded prompts.
-#     output_root = Path(cfg.output_root) / "outputs"
-#     for prompts_file in prompt_files:
-#         cached = cached_per_file.get(prompts_file, [])
-#         if not cached:
-#             continue
-#         prompt_name = prompts_file.stem
-#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         run_output_dir = output_root / prompt_name / f"inference_{timestamp}"
-#         engine.run_prompt_file(prompts_file, run_output_dir, cached)
-
-#     print(f"[Inference] All {len(prompt_files)} prompt file(s) processed.", flush=True)
-
-
-# if __name__ == "__main__":
-#     main()

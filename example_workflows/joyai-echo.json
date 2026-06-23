@@ -1,97 +1,22 @@
 {
   "id": "d706cd6b-b61c-444e-8f49-2971f3b77190",
   "revision": 0,
-  "last_node_id": 28,
-  "last_link_id": 32,
+  "last_node_id": 33,
+  "last_link_id": 40,
   "nodes": [
-    {
-      "id": 9,
-      "type": "SaveVideo",
-      "pos": [
-        22495.56434575585,
-        -571.1847324549719
-      ],
-      "size": [
-        375.23099935119535,
-        348.15399956746353
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "video",
-          "type": "VIDEO",
-          "link": 10
-        }
-      ],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "video/ComfyUI",
-        "auto",
-        "auto"
-      ]
-    },
-    {
-      "id": 17,
-      "type": "Note",
-      "pos": [
-        21108.389665478036,
-        -559.6352793124829
-      ],
-      "size": [
-        282.2286863958834,
-        88
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "支持json和提示词输入\n使用提示词输入时， 单行就是一个片段，注意使用换行符"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 14,
-      "type": "Note",
-      "pos": [
-        22103.922971219454,
-        50.363804306952005
-      ],
-      "size": [
-        283.2688826429985,
-        191.80732634188314
-      ],
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "low Vram try ：swap fast slow ，add prefetch num if use swap or stremming\n小显存可以试swap fast slow  ，其中swap可以加大prefetch的数值加大显存占用，其余模式，streaming也可以 但是要准备128的内存\n\nvae OOM 开启 enable tiles"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
     {
       "id": 10,
       "type": "CreateVideo",
       "pos": [
-        22534.11531357962,
-        -742.3958219311979
+        22549.23104333895,
+        -752.4729398663238
       ],
       "size": [
         270,
         102
       ],
       "flags": {},
-      "order": 10,
+      "order": 12,
       "mode": 0,
       "inputs": [
         {
@@ -124,18 +49,197 @@
       ]
     },
     {
+      "id": 18,
+      "type": "Note",
+      "pos": [
+        21742.841636504014,
+        163.1374872086969
+      ],
+      "size": [
+        329.2079829391223,
+        88
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "内存不够大时，可以关闭 sampler，只运行text encoder ，完成后，关闭text encdoer 再运行sampleer，避免内存OOM\n会自动读取推理的pt文件，你可以复制一份，方便抽卡，"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 17,
+      "type": "Note",
+      "pos": [
+        20934.05532011661,
+        -544.8219275763083
+      ],
+      "size": [
+        282.2286863958834,
+        88
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "支持json和提示词输入\n使用提示词输入时， 单行就是一个片段，注意使用换行符"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 13,
+      "type": "Note",
+      "pos": [
+        20934.56108301998,
+        -364.1458545920801
+      ],
+      "size": [
+        284.13561282761293,
+        154.53596434855024
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "if high vram set prefetech-count =0\n大显存设置 prefetech-count 为0\n\nif Vram >36G and RAM>128G  enable enable streaming  and add prefetech-count >1\n普通显存比如5090 32G 可以试试 开启enable streaming 加大prefetech-count 数值，不过也快不了多少\n\nif lower Vram set enable streaming off\n小显存关闭enable streaming ，prefetech-count 失效"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 1,
+      "type": "JoyAI_Echo_SM_Clip",
+      "pos": [
+        21300.943063912884,
+        -769.3073749571704
+      ],
+      "size": [
+        215.2578467102503,
+        134.43393189145536
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Clip"
+      },
+      "widgets_values": [
+        "gemma3-12b-it-qat.safetensors",
+        "none",
+        "connector-11.safetensors",
+        "cuda"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "PreviewAny",
+      "pos": [
+        21550.039953793123,
+        -219.56397636341757
+      ],
+      "size": [
+        411.03595163374484,
+        387.99516507180374
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": 30,
+      "type": "Video Slice",
+      "pos": [
+        23642.502777222413,
+        -458.0756061430339
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 34
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            35
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "Video Slice"
+      },
+      "widgets_values": [
+        4,
+        10,
+        false
+      ]
+    },
+    {
       "id": 4,
       "type": "JoyAI_Echo_SM_Model",
       "pos": [
-        22118.524118159465,
-        -769.7834114961479
+        22134.647506855672,
+        -806.0610783479107
       ],
       "size": [
         365.2870386489449,
         370
       ],
       "flags": {},
-      "order": 2,
+      "order": 4,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -168,18 +272,125 @@
       ]
     },
     {
+      "id": 14,
+      "type": "Note",
+      "pos": [
+        22155.133087920614,
+        162.12812249730058
+      ],
+      "size": [
+        283.2688826429985,
+        191.80732634188314
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "low Vram try ：swap fast slow ，add prefetch num if use swap or stremming\n小显存可以试swap fast slow  ，其中swap可以加大prefetch的数值加大显存占用，其余模式，streaming也可以 但是要准备128的内存\n\nvae OOM 开启 enable tiles"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 16,
+      "type": "Note",
+      "pos": [
+        22568.381022622856,
+        112.36624815104112
+      ],
+      "size": [
+        311.87236084798496,
+        88
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "num frames 是单个片段的时长，最长设置到20秒，多了ltx的短板会崩画面\n\nkeep num frames < 242, it a single shot's frame"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 9,
+      "type": "SaveVideo",
+      "pos": [
+        22517.979379829994,
+        -522.8464051620007
+      ],
+      "size": [
+        479.23099935119535,
+        508.8151519820959
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 10
+        }
+      ],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 29,
+      "type": "LoadVideo",
+      "pos": [
+        23021.08780730963,
+        -544.3085661289186
+      ],
+      "size": [
+        583.3987589215321,
+        493.763604985003
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            34
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "141bdb5cb9bd0c7b9b68edffa55627d9.mp4",
+        "image"
+      ]
+    },
+    {
       "id": 21,
       "type": "JoyAI_Echo_SM_KSampler",
       "pos": [
-        22159.714512832128,
-        -350.2442943445186
+        22174.83024259146,
+        -360.3214122796443
       ],
       "size": [
         274.9341796875,
-        342
+        410
       ],
       "flags": {},
-      "order": 9,
+      "order": 11,
       "mode": 0,
       "inputs": [
         {
@@ -192,6 +403,12 @@
           "shape": 7,
           "type": "CONDITIONING",
           "link": 28
+        },
+        {
+          "name": "first_video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": 35
         }
       ],
       "outputs": [
@@ -214,173 +431,35 @@
         "Node name for S&R": "JoyAI_Echo_SM_KSampler"
       },
       "widgets_values": [
-        768,
+        896,
         512,
-        1202841916,
+        1066240085,
         "randomize",
-        121,
+        241,
         "",
-        25,
+        24,
         1,
-        false,
+        true,
         24,
         512,
-        "auto"
+        "fast",
+        "center",
+        "center"
       ]
-    },
-    {
-      "id": 13,
-      "type": "Note",
-      "pos": [
-        21341.273930763844,
-        -286.2496663541942
-      ],
-      "size": [
-        284.13561282761293,
-        154.53596434855024
-      ],
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "if high vram set prefetech-count =0\n大显存设置 prefetech-count 为0\n\nif Vram >36G and RAM>128G  enable enable streaming  and add prefetech-count >1\n普通显存比如5090 32G 可以试试 开启enable streaming 加大prefetech-count 数值，不过也快不了多少\n\nif lower Vram set enable streaming off\n小显存关闭enable streaming ，prefetech-count 失效"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 12,
-      "type": "PreviewAny",
-      "pos": [
-        21771.662936859273,
-        -317.7314980479445
-      ],
-      "size": [
-        291.66326551122984,
-        145.22598556484604
-      ],
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "source",
-          "type": "*",
-          "link": 18
-        }
-      ],
-      "outputs": [
-        {
-          "name": "STRING",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "PreviewAny"
-      },
-      "widgets_values": [
-        null,
-        null,
-        null
-      ]
-    },
-    {
-      "id": 18,
-      "type": "Note",
-      "pos": [
-        21758.965109770827,
-        -124.06070165354072
-      ],
-      "size": [
-        329.2079829391223,
-        88
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "内存不够大时，可以关闭 sampler，只运行text encoder ，完成后，关闭text encdoer 再运行sampleer，避免内存OOM\n会自动读取推理的pt文件，你可以复制一份，方便抽卡，"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 1,
-      "type": "JoyAI_Echo_SM_Clip",
-      "pos": [
-        21579.281648501445,
-        -779.8350657426648
-      ],
-      "size": [
-        400.3746543484958,
-        130
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "clip",
-          "type": "CLIP",
-          "links": [
-            2
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "JoyAI_Echo_SM_Clip"
-      },
-      "widgets_values": [
-        "gemma3-12b-it-qat.safetensors",
-        "none",
-        "connector-11.safetensors",
-        "cuda"
-      ]
-    },
-    {
-      "id": 16,
-      "type": "Note",
-      "pos": [
-        22569.388850700972,
-        48.88035230311136
-      ],
-      "size": [
-        311.87236084798496,
-        88
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "num frames 是单个片段的时长，最长设置到20秒，多了ltx的短板会崩画面\n\nkeep num frames < 242, it a single shot's frame"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
     },
     {
       "id": 3,
       "type": "JoyAI_Echo_SM_Encoder",
       "pos": [
-        21536.677986119827,
-        -584.2494060538107
+        21531.972477873387,
+        -780.6008676302062
       ],
       "size": [
-        418.06196276679475,
-        234
+        544.227500457222,
+        768.6924167754769
       ],
       "flags": {},
-      "order": 7,
+      "order": 8,
       "mode": 0,
       "inputs": [
         {
@@ -410,7 +489,7 @@
       "widgets_values": [
         1,
         false,
-        "",
+        "ID_A is a young woman has a neat, sleek straight bob haircut with sharp, evenly cut chin-length black hair and thin straight bangs resting lightly above her eyebrows. Her facial features are delicate: soft almond-shaped dark eyes with subtle warm-toned eye makeup, natural rosy blush on the cheeks, and glossy pale pink lips curved into a gentle, bright smile, revealing a glimpse of her upper teeth. She has fair, smooth skin and a slender, well-proportioned figure with delicate shoulder and neck lines.She wears a striking asymmetrical black velvet bodycon midi dress:The right shoulder is designed with an exaggerated structured power shoulder pad and a long tailored long sleeve, while her left shoulder is completely bare in a strapless sweetheart bustier cut.A full-length vertical silver metal zipper runs straight down the front center from the upper bust all the way to the thigh hem, with dual zipper pulls at the bottom that create a high thigh slit on her left leg, exposing her thigh and calf.The thick velvet fabric hugs her curves tightly in a fitted sheath silhouette, emphasizing her waist and hip contours. On her feet are classic pointed-toe black stiletto high heels, partially visible beneath her crossed legs.She reclines elegantly on a smooth white studio floor, leaning her weight backward. Her right arm stretches fully outward to rest flat palm-down on the floor behind her torso for support. Her legs are extended forward and neatly crossed at the ankles, with her torso tilted slightly to her left, and her head turned gently toward the camera with relaxed, confident body language.background is a minimalist professional photography studio setting:The backdrop is a seamless, matte medium-gray wall with no extra decorations or objects. The floor is a flat, bright pure-white cyclorama surface with subtle soft shadows cast by her body. two strong overhead key lights beam down from the upper frame, creating bright highlight areas on her hair, shoulder, arm, legs and the white floor, paired with soft diffused shadows that add strong depth and dimensionality. The overall lighting style is high-contrast commercial fashion lighting, delivering a clean, sophisticated, high-fashion atmosphere with a cool monochrome color palette dominated by black, white and gray tones.ID_A’s voice is a clear young female voice with a soft mid-high register, gentle breathiness, and intimate vlog-style pacing.The woman said in a cheerful tone，sichuan dialect to say, '哎哟喂，T8瓜娃子.居然一周了才更新' ，The woman walked towards the camera with the footsteps of a model .The background music is lively and rhythmic\n\nID_A is a young woman has a neat, sleek straight bob haircut with sharp, evenly cut chin-length black hair and thin straight bangs resting lightly above her eyebrows. Her facial features are delicate: soft almond-shaped dark eyes with subtle warm-toned eye makeup, natural rosy blush on the cheeks, and glossy pale pink lips curved into a gentle, bright smile, revealing a glimpse of her upper teeth. She has fair, smooth skin and a slender, well-proportioned figure with delicate shoulder and neck lines.She wears a striking asymmetrical black velvet bodycon midi dress:The right shoulder is designed with an exaggerated structured power shoulder pad and a long tailored long sleeve, while her left shoulder is completely bare in a strapless sweetheart bustier cut.A full-length vertical silver metal zipper runs straight down the front center from the upper bust all the way to the thigh hem, with dual zipper pulls at the bottom that create a high thigh slit on her left leg, exposing her thigh and calf.The thick velvet fabric hugs her curves tightly in a fitted sheath silhouette, emphasizing her waist and hip contours. On her feet are classic pointed-toe black stiletto high heels, partially visible beneath her crossed legs.background is a minimalist professional photography studio setting:The backdrop is a seamless, matte medium-gray wall with no extra decorations or objects.  two strong overhead key lights beam down from the upper frame, creating bright highlight areas on her hair, shoulder, arm, legs and the white floor, paired with soft diffused shadows that add strong depth and dimensionality. The overall lighting style is high-contrast commercial fashion lighting, delivering a clean, sophisticated, high-fashion atmosphere with a cool monochrome color palette dominated by black, white and gray tones.ID_A’s voice is a clear young female voice with a soft mid-high register, gentle breathiness, and intimate vlog-style pacing.ID_A said in a cheerful tone， say, '我天天要忙着走秀，哪里有时间陪你 ，The camera slowly followed ID_A to the door, where ID_A lifted the red velvet curtain and walked out. The camera then passed over her shoulder, and outside the door was a brightly lit fashion show runway. ID_A walked towards the center of the runway with model steps, and the seats below were filled with people. The music was intense and rhythmic.",
         "",
         ""
       ]
@@ -472,6 +551,22 @@
       10,
       1,
       "AUDIO"
+    ],
+    [
+      34,
+      29,
+      0,
+      30,
+      0,
+      "VIDEO"
+    ],
+    [
+      35,
+      30,
+      0,
+      21,
+      2,
+      "VIDEO"
     ]
   ],
   "groups": [
@@ -479,10 +574,10 @@
       "id": 1,
       "title": "stage 1 ：text encoder",
       "bounding": [
-        21413.883069354153,
-        -833.6903427911261,
-        669.4246798791319,
-        635.3220696838207
+        21263.129198989307,
+        -851.4260703569475,
+        830.658905123626,
+        847.5463657957304
       ],
       "color": "#3f789e",
       "flags": {}
@@ -491,10 +586,10 @@
       "id": 2,
       "title": "stage2 ：sampler",
       "bounding": [
-        22100.46233924075,
-        -836.7602655442823,
-        776.668637785624,
-        838.2737637622081
+        22115.57806900008,
+        -846.8373834794082,
+        877.4399439928129,
+        907.8060360844884
       ],
       "color": "#3f789e",
       "flags": {}
@@ -503,10 +598,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.7217063830883171,
+      "scale": 0.7217063830883211,
       "offset": [
-        -20852.786012756616,
-        948.1223841989672
+        -20713.51022410258,
+        1069.8461518842487
       ]
     },
     "frontendVersion": "1.45.15",
