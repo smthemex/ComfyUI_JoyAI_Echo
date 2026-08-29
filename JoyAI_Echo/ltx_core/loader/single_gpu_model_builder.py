@@ -296,6 +296,7 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
             meta_model.load_state_dict(sd, strict=False, assign=True)
             del sd
             # 如果没有 LoRA，直接把模型送往最终的目标设备 (GPU)
+            print("Transferring model to target device: ",device)
             return self._return_model(meta_model, device)
 
         # 4. 单线程加载 LoRA (同样利用 mmap)

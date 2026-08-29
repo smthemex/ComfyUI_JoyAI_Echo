@@ -15,6 +15,8 @@ from ..ltx_core.components.schedulers import LTX2Scheduler
 from ..ltx_core.loader import LoraPathStrengthAndSDOps
 from ..ltx_core.model.audio_vae import decode_audio as vae_decode_audio
 from ..ltx_core.model.video_vae import decode_video as vae_decode_video
+from ..ltx_core.model.video_vae.video_vae import decode_video_to_fhwc
+from ..ltx_core.model.video_vae.tiling import TilingConfig
 from ..ltx_core.quantization import QuantizationPolicy
 from ..ltx_core.types import Audio, LatentState, VideoPixelShape
 from .utils import (
@@ -32,7 +34,8 @@ from .utils.args import ImageConditioningInput, default_1_stage_arg_parser, dete
 from .utils.constants import detect_params
 from .utils.media_io import encode_video
 from .utils.types import PipelineComponents
-
+from ..utils import streaming_single_model,streaming_prefetch_model,_full_gpu_ctx,streaming_single_fast
+from ..ltx_core.model.transformer.model import BlockGPUManager
 device = get_device()
 
 
@@ -52,9 +55,11 @@ class TI2VidOneStagePipeline:
         loras: list[LoraPathStrengthAndSDOps],
         device: torch.device = device,
         quantization: QuantizationPolicy | None = None,
+        action_config=None,
     ):
         self.dtype = torch.bfloat16
         self.device = device
+        self.action_config = action_config
         self.model_ledger = ModelLedger(
             dtype=self.dtype,
             device=device,
@@ -67,6 +72,36 @@ class TI2VidOneStagePipeline:
             dtype=self.dtype,
             device=device,
         )
+
+    def _model_ctx(self,model,prefetch_count: int | None,) :
+        if prefetch_count is not None :
+            layers_attr="model.velocity_model.transformer_blocks"
+            if self.streaming_mode=="fast":
+                return streaming_single_fast(
+                    model,
+                    layers_attr=layers_attr,
+                    target_device=torch.device("cuda"),
+                )
+            elif self.streaming_mode=="slow":
+                    return streaming_single_model(
+                        model,
+                        layers_attr=layers_attr,
+                        target_device=torch.device("cuda"),
+                    )
+            elif self.streaming_mode=="auto":
+                return streaming_prefetch_model(
+                    model,
+                    layers_attr=layers_attr,
+                    target_device=torch.device("cuda"),
+                    prefetch_count=prefetch_count,
+                )
+            else:
+                gpu_manager=BlockGPUManager(block_group_size=prefetch_count)
+                gpu_manager.setup_for_inference(model.model.velocity_model)
+                model.gpu_manager=gpu_manager
+                return _full_gpu_ctx(model)
+        
+        return _full_gpu_ctx(model)
 
     def __call__(  # noqa: PLR0913
         self,
@@ -82,6 +117,10 @@ class TI2VidOneStagePipeline:
         audio_guider_params: MultiModalGuiderParams | MultiModalGuiderFactory,
         images: list[ImageConditioningInput],
         enhance_prompt: bool = False,
+        action_cond: dict[str, torch.Tensor] | None = None,
+        video_tiling_config: TilingConfig | None = None,
+        te_cond=None,
+        prefetch_count: int | None = None,
     ) -> tuple[Iterator[torch.Tensor], Audio]:
         assert_resolution(height=height, width=width, is_two_stage=False)
 
@@ -89,16 +128,23 @@ class TI2VidOneStagePipeline:
         noiser = GaussianNoiser(generator=generator)
         stepper = EulerDiffusionStep()
         dtype = torch.bfloat16
-
-        ctx_p, ctx_n = encode_prompts(
-            [prompt, negative_prompt],
-            self.model_ledger,
-            enhance_first_prompt=enhance_prompt,
-            enhance_prompt_image=images[0][0] if len(images) > 0 else None,
-            enhance_prompt_seed=seed,
-        )
-        v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
-        v_context_n, a_context_n = ctx_n.video_encoding, ctx_n.audio_encoding
+        if te_cond is None:
+            ctx_p, ctx_n = encode_prompts(
+                [prompt, negative_prompt],
+                self.model_ledger,
+                enhance_first_prompt=enhance_prompt,
+                enhance_prompt_image=images[0][0] if len(images) > 0 else None,
+                enhance_prompt_seed=seed,
+            )
+            v_context_p, a_context_p = ctx_p.video_encoding, ctx_p.audio_encoding
+            v_context_n, a_context_n = ctx_n.video_encoding, ctx_n.audio_encoding
+        else:
+            v_context_p, a_context_p = te_cond["video_context"], te_cond["audio_context"]
+            v_context_n, a_context_n = te_cond.get("video_context_n",None), te_cond.get("audio_context_n",None)
+            if v_context_n is None:
+                v_context_n = torch.zeros_like(v_context_p)
+            if a_context_n is None:
+                a_context_n = torch.zeros_like(a_context_p)
 
         # Encode image conditionings with the VAE encoder, then free it
         # before loading the transformer to reduce peak VRAM.
@@ -116,7 +162,7 @@ class TI2VidOneStagePipeline:
         del video_encoder
         cleanup_memory()
 
-        transformer = self.model_ledger.transformer()
+        transformer = self.model_ledger.transformer(action_config=self.action_config)
         sigmas = LTX2Scheduler().execute(steps=num_inference_steps).to(dtype=torch.float32, device=self.device)
 
         video_guider_factory = create_multimodal_guider_factory(
@@ -127,96 +173,102 @@ class TI2VidOneStagePipeline:
             params=audio_guider_params,
             negative_context=a_context_n,
         )
+        with self._model_ctx(transformer,prefetch_count) as transformer:
+            def first_stage_denoising_loop(
+                sigmas: torch.Tensor, video_state: LatentState, audio_state: LatentState, stepper: DiffusionStepProtocol
+            ) -> tuple[LatentState, LatentState]:
+                return euler_denoising_loop(
+                    sigmas=sigmas,
+                    video_state=video_state,
+                    audio_state=audio_state,
+                    stepper=stepper,
+                    denoise_fn=multi_modal_guider_factory_denoising_func(
+                        video_guider_factory=video_guider_factory,
+                        audio_guider_factory=audio_guider_factory,
+                        v_context=v_context_p,
+                        a_context=a_context_p,
+                        transformer=transformer,  # noqa: F821
+                        action_cond=action_cond,
+                    ),
+                )
 
-        def first_stage_denoising_loop(
-            sigmas: torch.Tensor, video_state: LatentState, audio_state: LatentState, stepper: DiffusionStepProtocol
-        ) -> tuple[LatentState, LatentState]:
-            return euler_denoising_loop(
+            video_state, audio_state = denoise_audio_video(
+                output_shape=stage_1_output_shape,
+                conditionings=stage_1_conditionings,
+                noiser=noiser,
                 sigmas=sigmas,
-                video_state=video_state,
-                audio_state=audio_state,
                 stepper=stepper,
-                denoise_fn=multi_modal_guider_factory_denoising_func(
-                    video_guider_factory=video_guider_factory,
-                    audio_guider_factory=audio_guider_factory,
-                    v_context=v_context_p,
-                    a_context=a_context_p,
-                    transformer=transformer,  # noqa: F821
-                ),
+                denoising_loop_fn=first_stage_denoising_loop,
+                components=self.pipeline_components,
+                dtype=dtype,
+                device=self.device,
             )
-
-        video_state, audio_state = denoise_audio_video(
-            output_shape=stage_1_output_shape,
-            conditionings=stage_1_conditionings,
-            noiser=noiser,
-            sigmas=sigmas,
-            stepper=stepper,
-            denoising_loop_fn=first_stage_denoising_loop,
-            components=self.pipeline_components,
-            dtype=dtype,
-            device=self.device,
-        )
 
         torch.cuda.synchronize()
         del transformer
         cleanup_memory()
 
-        decoded_video = vae_decode_video(video_state.latent, self.model_ledger.video_decoder(), generator=generator)
+        decoded_video = decode_video_to_fhwc(
+            video_state.latent,
+            self.model_ledger.video_decoder(),
+            tiling_config=video_tiling_config,
+            generator=generator,
+        )
         decoded_audio = vae_decode_audio(
             audio_state.latent, self.model_ledger.audio_decoder(), self.model_ledger.vocoder()
         )
         return decoded_video, decoded_audio
 
 
-@torch.inference_mode()
-def main() -> None:
-    logging.getLogger().setLevel(logging.INFO)
-    checkpoint_path = detect_checkpoint_path()
-    params = detect_params(checkpoint_path)
-    parser = default_1_stage_arg_parser(params=params)
-    args = parser.parse_args()
-    pipeline = TI2VidOneStagePipeline(
-        checkpoint_path=args.checkpoint_path,
-        gemma_root=args.gemma_root,
-        loras=tuple(args.lora) if args.lora else (),
-        quantization=args.quantization,
-    )
-    video, audio = pipeline(
-        prompt=args.prompt,
-        negative_prompt=args.negative_prompt,
-        seed=args.seed,
-        height=args.height,
-        width=args.width,
-        num_frames=args.num_frames,
-        frame_rate=args.frame_rate,
-        num_inference_steps=args.num_inference_steps,
-        video_guider_params=MultiModalGuiderParams(
-            cfg_scale=args.video_cfg_guidance_scale,
-            stg_scale=args.video_stg_guidance_scale,
-            rescale_scale=args.video_rescale_scale,
-            modality_scale=args.a2v_guidance_scale,
-            skip_step=args.video_skip_step,
-            stg_blocks=args.video_stg_blocks,
-        ),
-        audio_guider_params=MultiModalGuiderParams(
-            cfg_scale=args.audio_cfg_guidance_scale,
-            stg_scale=args.audio_stg_guidance_scale,
-            rescale_scale=args.audio_rescale_scale,
-            modality_scale=args.v2a_guidance_scale,
-            skip_step=args.audio_skip_step,
-            stg_blocks=args.audio_stg_blocks,
-        ),
-        images=args.images,
-    )
+# @torch.inference_mode()
+# def main() -> None:
+#     logging.getLogger().setLevel(logging.INFO)
+#     checkpoint_path = detect_checkpoint_path()
+#     params = detect_params(checkpoint_path)
+#     parser = default_1_stage_arg_parser(params=params)
+#     args = parser.parse_args()
+#     pipeline = TI2VidOneStagePipeline(
+#         checkpoint_path=args.checkpoint_path,
+#         gemma_root=args.gemma_root,
+#         loras=tuple(args.lora) if args.lora else (),
+#         quantization=args.quantization,
+#     )
+#     video, audio = pipeline(
+#         prompt=args.prompt,
+#         negative_prompt=args.negative_prompt,
+#         seed=args.seed,
+#         height=args.height,
+#         width=args.width,
+#         num_frames=args.num_frames,
+#         frame_rate=args.frame_rate,
+#         num_inference_steps=args.num_inference_steps,
+#         video_guider_params=MultiModalGuiderParams(
+#             cfg_scale=args.video_cfg_guidance_scale,
+#             stg_scale=args.video_stg_guidance_scale,
+#             rescale_scale=args.video_rescale_scale,
+#             modality_scale=args.a2v_guidance_scale,
+#             skip_step=args.video_skip_step,
+#             stg_blocks=args.video_stg_blocks,
+#         ),
+#         audio_guider_params=MultiModalGuiderParams(
+#             cfg_scale=args.audio_cfg_guidance_scale,
+#             stg_scale=args.audio_stg_guidance_scale,
+#             rescale_scale=args.audio_rescale_scale,
+#             modality_scale=args.v2a_guidance_scale,
+#             skip_step=args.audio_skip_step,
+#             stg_blocks=args.audio_stg_blocks,
+#         ),
+#         images=args.images,
+#     )
 
-    encode_video(
-        video=video,
-        fps=args.frame_rate,
-        audio=audio,
-        output_path=args.output_path,
-        video_chunks_number=1,
-    )
+#     encode_video(
+#         video=video,
+#         fps=args.frame_rate,
+#         audio=audio,
+#         output_path=args.output_path,
+#         video_chunks_number=1,
+#     )
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

@@ -15,6 +15,37 @@ import json
 from comfy_api.latest import  Types
 cur_path = os.path.dirname(os.path.abspath(__file__))
 
+def format_shot_num_secs(shot_num_secs):
+    # ========== 优化：解析 shot_num_secs，严格去空格并处理无输入情况 ==========
+    shot_frames_list = None
+    # 防御 shot_num_secs 为 None 的情况，并去除整体首尾空格
+    if shot_num_secs is not None and str(shot_num_secs).strip():
+        shot_frames_list = []
+        # 按逗号分割，去除每个元素首尾空格，并过滤空字符串
+        secs_str_list = [s.strip() for s in str(shot_num_secs).split(",") if s.strip()]
+        
+        for s_stripped in secs_str_list:
+            try:
+                secs = float(s_stripped)
+            except ValueError:
+                print(f"[JoyAI_Echo_SM_KSampler] Warning: Invalid value '{s_stripped}' in shot_num_secs, skipping.")
+                continue
+            
+            # 转换公式：(秒数 x frame_rate) 向上取整到 8 的倍数，然后 + 1
+            base_frames = secs * frame_rate
+            base_frames_aligned = math.ceil(base_frames / 8) * 8
+            final_frames = int(base_frames_aligned) + 1
+            shot_frames_list.append(final_frames)
+        
+        # 如果解析后列表为空（例如输入的全是非法字符），则重置为 None
+        if not shot_frames_list:
+            shot_frames_list = None
+        else:
+            print(f"[JoyAI_Echo_SM_KSampler] Parsed shot_num_secs -> shot_frames: {shot_frames_list}")
+    # =======================================================================
+    return shot_frames_list
+
+
 
 def create_temp_json(prompts):
     prompts = prompts.splitlines()
@@ -27,7 +58,12 @@ def create_temp_json(prompts):
         f.write(json.dumps(data, ensure_ascii=False) + "\n")     
     return [temp_path]
 
-
+def image2path(image,width, height):
+    image=tensor_upscale(image, width, height)
+    unique_id = uuid.uuid4().hex[:8] 
+    image_file = os.path.join(folder_paths.get_temp_directory(), f"image_refer_temp_{unique_id}.png")
+    tensor2image(image).save(image_file)
+    return image_file
 
 def audio2path(audio,):
     unique_id = uuid.uuid4().hex[:8] 

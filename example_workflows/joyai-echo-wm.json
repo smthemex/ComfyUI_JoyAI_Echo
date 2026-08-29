@@ -1,0 +1,620 @@
+{
+  "id": "d706cd6b-b61c-444e-8f49-2971f3b77190",
+  "revision": 0,
+  "last_node_id": 36,
+  "last_link_id": 46,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "CreateVideo",
+      "pos": [
+        22620.679105466636,
+        -804.0092553982452
+      ],
+      "size": [
+        270,
+        138
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 44
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 45
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CreateVideo"
+      },
+      "widgets_values": [
+        24,
+        "auto",
+        "sRGB"
+      ],
+      "widgets_values_named": {
+        "fps": 24,
+        "bit_depth": "auto",
+        "color_space": "sRGB"
+      }
+    },
+    {
+      "id": 17,
+      "type": "Note",
+      "pos": [
+        20934.05532011661,
+        -544.8219275763083
+      ],
+      "size": [
+        282.1875,
+        88
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "支持json和提示词输入\n使用提示词输入时， 单行就是一个片段，注意使用换行符"
+      ],
+      "widgets_values_named": {
+        "text": "支持json和提示词输入\n使用提示词输入时， 单行就是一个片段，注意使用换行符"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 13,
+      "type": "Note",
+      "pos": [
+        20937.86684292281,
+        -404.47639779488225
+      ],
+      "size": [
+        284.125,
+        154.5
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "if high vram set prefetech-count =0\n大显存设置 prefetech-count 为0\n\nif Vram >36G and RAM>128G  enable enable streaming  and add prefetech-count >1\n普通显存比如5090 32G 可以试试 开启enable streaming 加大prefetech-count 数值，不过也快不了多少\n\nif lower Vram set enable streaming off\n小显存关闭enable streaming ，prefetech-count 失效"
+      ],
+      "widgets_values_named": {
+        "text": "if high vram set prefetech-count =0\n大显存设置 prefetech-count 为0\n\nif Vram >36G and RAM>128G  enable enable streaming  and add prefetech-count >1\n普通显存比如5090 32G 可以试试 开启enable streaming 加大prefetech-count 数值，不过也快不了多少\n\nif lower Vram set enable streaming off\n小显存关闭enable streaming ，prefetech-count 失效"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 1,
+      "type": "JoyAI_Echo_SM_Clip",
+      "pos": [
+        21243.443847665327,
+        -769.3073749571704
+      ],
+      "size": [
+        286.8125,
+        186.6875
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Clip"
+      },
+      "widgets_values": [
+        "gemma3-12b-it-qat.safetensors",
+        "none",
+        "connector-11.safetensors",
+        "cuda"
+      ],
+      "widgets_values_named": {
+        "clip": "gemma3-12b-it-qat.safetensors",
+        "gguf": "none",
+        "connector": "connector-11.safetensors",
+        "infer_device": "cuda"
+      }
+    },
+    {
+      "id": 12,
+      "type": "PreviewAny",
+      "pos": [
+        21278.51588880289,
+        -358.94630205006314
+      ],
+      "size": [
+        650.5625,
+        397.5
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [],
+      "widgets_values_named": {}
+    },
+    {
+      "id": 4,
+      "type": "JoyAI_Echo_SM_Model",
+      "pos": [
+        22151.791020820518,
+        -917.865071239604
+      ],
+      "size": [
+        365.25,
+        474
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Model"
+      },
+      "widgets_values": [
+        "echo-wm-flash.safetensors",
+        "none",
+        "none",
+        "none",
+        "none",
+        0,
+        "none",
+        0,
+        "none",
+        0,
+        "none",
+        0,
+        "none",
+        0
+      ],
+      "widgets_values_named": {
+        "dit": "echo-wm-flash.safetensors",
+        "gguf": "none",
+        "vae": "none",
+        "audio_vae": "none",
+        "lora_1": "none",
+        "lora_1_weight": 0,
+        "lora_2": "none",
+        "lora_2_weight": 0,
+        "lora_3": "none",
+        "lora_3_weight": 0,
+        "lora_4": "none",
+        "lora_4_weight": 0,
+        "lora_5": "none",
+        "lora_5_weight": 0
+      }
+    },
+    {
+      "id": 14,
+      "type": "Note",
+      "pos": [
+        21508.871325370845,
+        63.69278453901575
+      ],
+      "size": [
+        561.75,
+        239.75
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "low Vram try ：swap fast slow ，add prefetch num if use swap or stremming\n小显存可以试swap fast slow  ，其中swap可以加大prefetch的数值加大显存占用，其余模式，streaming也可以 但是要准备128的内存\n\nvae OOM 开启 enable tiles\n\nnum frames 是单个片段的时长，最长设置到20秒，多了ltx的短板会崩画面\n\nkeep num frames < 242, it a single shot's frame\n\nif  use wm model ,num frames must be :1 + n *24 (n=1,2,3,4,5)\n世界模型的总帧数按此公式计算\n\n内存不够大时，可以关闭 sampler，只运行text encoder ，完成后，关闭text encdoer 再运行sampleer，避免内存OOM\n会自动读取推理的pt文件，你可以复制一份，方便抽卡，"
+      ],
+      "widgets_values_named": {
+        "text": "low Vram try ：swap fast slow ，add prefetch num if use swap or stremming\n小显存可以试swap fast slow  ，其中swap可以加大prefetch的数值加大显存占用，其余模式，streaming也可以 但是要准备128的内存\n\nvae OOM 开启 enable tiles\n\nnum frames 是单个片段的时长，最长设置到20秒，多了ltx的短板会崩画面\n\nkeep num frames < 242, it a single shot's frame\n\nif  use wm model ,num frames must be :1 + n *24 (n=1,2,3,4,5)\n世界模型的总帧数按此公式计算\n\n内存不够大时，可以关闭 sampler，只运行text encoder ，完成后，关闭text encdoer 再运行sampleer，避免内存OOM\n会自动读取推理的pt文件，你可以复制一份，方便抽卡，"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 9,
+      "type": "SaveVideo",
+      "pos": [
+        22787.537093038005,
+        -589.6560497152233
+      ],
+      "size": [
+        606.796875,
+        106
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "properties": {},
+      "widgets_values": [
+        "video/ComfyUI",
+        "auto",
+        "auto",
+        "auto"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "video/ComfyUI",
+        "format": "auto",
+        "format.codec": "auto",
+        "codec": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "JoyAI_Echo_SM_Encoder",
+      "pos": [
+        21531.972477873387,
+        -780.6008676302062
+      ],
+      "size": [
+        554.8125,
+        756.9375
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 2
+        },
+        {
+          "name": "selected_path",
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "te_cond",
+          "type": "CONDITIONING",
+          "links": [
+            18,
+            42
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_Encoder"
+      },
+      "widgets_values": [
+        1,
+        false,
+        "worst quality, inconsistent motion, blurry, jittery, distorted, game UI, video game interface, HUD, heads-up display, menu, status bar, health bar, score, minimap, crosshair, reticle, buttons, icons, subtitles, captions, watermark, logo, text overlay, user interface",
+        "",
+        ""
+      ],
+      "widgets_values_named": {
+        "prefetch_count": 1,
+        "enable_streaming": false,
+        "prompt": "worst quality, inconsistent motion, blurry, jittery, distorted, game UI, video game interface, HUD, heads-up display, menu, status bar, health bar, score, minimap, crosshair, reticle, buttons, icons, subtitles, captions, watermark, logo, text overlay, user interface",
+        "prompt_files": "",
+        "path-button": ""
+      }
+    },
+    {
+      "id": 36,
+      "type": "JoyAI_Echo_SM_KSampler",
+      "pos": [
+        22237.146846243402,
+        -391.2775322552762
+      ],
+      "size": [
+        352.5,
+        629.96875
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 43
+        },
+        {
+          "name": "te_cond",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": 42
+        },
+        {
+          "name": "negative_cond",
+          "shape": 7,
+          "type": "CONDITIONING",
+          "link": null
+        },
+        {
+          "name": "first_video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        },
+        {
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 46
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            44
+          ]
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            45
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JoyAI_Echo_SM_KSampler"
+      },
+      "widgets_values": [
+        768,
+        480,
+        732009458,
+        "randomize",
+        121,
+        30,
+        "",
+        25,
+        1,
+        false,
+        24,
+        512,
+        70,
+        "fast",
+        "center",
+        "center",
+        "none",
+        "w-60,a-60,w-60,d-60"
+      ],
+      "widgets_values_named": {
+        "width": 768,
+        "height": 480,
+        "seed": 732009458,
+        "control_after_generate": "randomize",
+        "num_frames": 121,
+        "steps": 30,
+        "shot_num_secs": "",
+        "frame_rate": 25,
+        "prefetch_count": 1,
+        "enable_tiles": false,
+        "tile_size_in_frames": 24,
+        "tile_size_in_pixels": 512,
+        "fov_deg": 70,
+        "streaming_mode": "fast",
+        "audio_memory_mode": "center",
+        "video_memory_mode": "center",
+        "geo_model": "none",
+        "action_str": "w-60,a-60,w-60,d-60"
+      }
+    },
+    {
+      "id": 34,
+      "type": "LoadImage",
+      "pos": [
+        22635.093993316706,
+        -262.12633944379894
+      ],
+      "size": [
+        651.8125,
+        401.625
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            46
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "input.png",
+        "image"
+      ],
+      "widgets_values_named": {
+        "image": "input.png",
+        "upload": "image"
+      }
+    }
+  ],
+  "links": [
+    [
+      2,
+      1,
+      0,
+      3,
+      0,
+      "CLIP"
+    ],
+    [
+      10,
+      10,
+      0,
+      9,
+      0,
+      "VIDEO"
+    ],
+    [
+      18,
+      3,
+      0,
+      12,
+      0,
+      "CONDITIONING"
+    ],
+    [
+      42,
+      3,
+      0,
+      36,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      43,
+      4,
+      0,
+      36,
+      0,
+      "MODEL"
+    ],
+    [
+      44,
+      36,
+      0,
+      10,
+      0,
+      "IMAGE"
+    ],
+    [
+      45,
+      36,
+      1,
+      10,
+      1,
+      "AUDIO"
+    ],
+    [
+      46,
+      34,
+      0,
+      36,
+      4,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "stage 1 ：text encoder",
+      "bounding": [
+        21263.129198989307,
+        -851.4260703569475,
+        830.658905123626,
+        847.5463657957304
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "stage2 ：sampler",
+      "bounding": [
+        22115.57806900008,
+        -846.8373834794082,
+        885.4399883820188,
+        1084.5333310063634
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6209213230591553,
+      "offset": [
+        -20729.72902520983,
+        1129.0833237546447
+      ]
+    },
+    "frontendVersion": "1.49.6",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

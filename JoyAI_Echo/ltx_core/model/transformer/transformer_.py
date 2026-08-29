@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field, replace
 
 import torch
+import torch.nn.functional as F
 
 from ...guidance.perturbations import BatchedPerturbationConfig, PerturbationType
 from .adaln import adaln_embedding_coefficient
-from .attention import Attention, AttentionCallable, AttentionFunction,update_kv_cache
+from .attention_ import Attention, AttentionCallable, AttentionFunction, update_kv_cache
 from .feed_forward import FeedForward
-from .rope import LTXRopeType
-from .transformer_args import TransformerArgs
+from .rope_ import LTXRopeType
+from .transformer_args_ import TransformerArgs
+from .ucpe_prope import _prepare_apply_fns
 from ...utils import rms_norm
 
 
@@ -80,6 +82,7 @@ def _ucpe_cache_attend(cache: dict, start: int, k: torch.Tensor, v: torch.Tensor
         flat_k.view(batch, active, heads, dim).transpose(1, 2),
         flat_v.view(batch, active, heads, dim).transpose(1, 2),
     )
+
 
 class BasicAVTransformerBlock(torch.nn.Module):
     def __init__(
@@ -184,6 +187,102 @@ class BasicAVTransformerBlock(torch.nn.Module):
             self.audio_prompt_scale_shift_table = torch.nn.Parameter(torch.empty(2, audio.dim))
 
         self.norm_eps = norm_eps
+        self.action_owns = False
+        self.action_ucpe_enabled = False
+
+    def _init_action_params(self, video: TransformerConfig, action_config: ActionBlockConfig) -> None:
+        """Attach the zero-initialized pure-UCPE branch to this block."""
+        if self.action_owns:
+            raise RuntimeError(f"Action params already initialized for block idx={self.idx}")
+        if not action_config.owns(self.idx):
+            return
+        from .ucpe_prope import PropeDotProductAttention
+
+        self.action_owns = True
+        self.action_ucpe_enabled = True
+        vdim = video.dim
+        attn_dim = action_config.ucpe_attn_dim or vdim
+        num_heads = action_config.ucpe_num_heads or video.heads
+        if attn_dim % num_heads != 0 or (attn_dim // num_heads) % 4 != 0:
+            raise ValueError("UCPE attention dimension must be divisible by heads and by 4")
+        self.ucpe_num_heads = num_heads
+        self.ucpe_head_dim = attn_dim // num_heads
+        self.ucpe_q_proj = torch.nn.Linear(vdim, attn_dim, bias=False)
+        self.ucpe_k_proj = torch.nn.Linear(vdim, attn_dim, bias=False)
+        self.ucpe_v_proj = torch.nn.Linear(vdim, attn_dim, bias=False)
+        self.ucpe_out_proj = torch.nn.Linear(attn_dim, vdim, bias=True)
+        torch.nn.init.xavier_uniform_(self.ucpe_q_proj.weight)
+        torch.nn.init.xavier_uniform_(self.ucpe_k_proj.weight)
+        torch.nn.init.xavier_uniform_(self.ucpe_v_proj.weight)
+        torch.nn.init.zeros_(self.ucpe_out_proj.weight)
+        torch.nn.init.zeros_(self.ucpe_out_proj.bias)
+        self.ucpe_prope = PropeDotProductAttention(
+            head_dim=self.ucpe_head_dim,
+            patches_x=action_config.ucpe_patches_x,
+            patches_y=action_config.ucpe_patches_y,
+            image_width=action_config.ucpe_image_width,
+            image_height=action_config.ucpe_image_height,
+            freq_base=action_config.ucpe_freq_base,
+            freq_scale=action_config.ucpe_freq_scale,
+        )
+
+    def _apply_ucpe_attention(
+        self,
+        norm_vx: torch.Tensor,
+        viewmats: torch.Tensor,
+        Ks: torch.Tensor,
+        kv_cache: dict | None = None,
+        kv_cache_start: int = 0,
+    ) -> torch.Tensor:
+        batch, seq_len, _ = norm_vx.shape
+        heads, head_dim = self.ucpe_num_heads, self.ucpe_head_dim
+        q = self.ucpe_q_proj(norm_vx).view(batch, seq_len, heads, head_dim).transpose(1, 2)
+        k = self.ucpe_k_proj(norm_vx).view(batch, seq_len, heads, head_dim).transpose(1, 2)
+        v = self.ucpe_v_proj(norm_vx).view(batch, seq_len, heads, head_dim).transpose(1, 2)
+        if kv_cache is not None and kv_cache.get("bounded_anchor_translation", False):
+            ppf = int(kv_cache["patches_per_frame"])
+            k, v = _ucpe_cache_attend(kv_cache, kv_cache_start, k, v)
+            current_start = kv_cache_start // ppf
+            current_end = current_start + seq_len // ppf
+            indices, anchor_index = active_sink_fifo_indices(
+                current_end,
+                int(kv_cache["local_attn_size"]) // ppf,
+                int(kv_cache["sink_tokens"]) // ppf,
+                kv_cache["full_ucpe_viewmats"].device,
+            )
+            all_viewmats = kv_cache["full_ucpe_viewmats"]
+            all_Ks = kv_cache["full_ucpe_Ks"]
+            anchor = all_viewmats[:, anchor_index : anchor_index + 1]
+            q_viewmats = rebase_viewmat_translation(all_viewmats[:, current_start:current_end], anchor)
+            k_viewmats = rebase_viewmat_translation(all_viewmats.index_select(1, indices), anchor)
+            kwargs = dict(
+                head_dim=self.ucpe_prope.head_dim,
+                patches_x=self.ucpe_prope.patches_x,
+                patches_y=self.ucpe_prope.patches_y,
+                image_width=self.ucpe_prope.image_width,
+                image_height=self.ucpe_prope.image_height,
+                coeffs_x=None if self.ucpe_prope.coeffs_x_0 is None else (self.ucpe_prope.coeffs_x_0, self.ucpe_prope.coeffs_x_1),
+                coeffs_y=None if self.ucpe_prope.coeffs_y_0 is None else (self.ucpe_prope.coeffs_y_0, self.ucpe_prope.coeffs_y_1),
+            )
+            apply_q, _, apply_out = _prepare_apply_fns(viewmats=q_viewmats, Ks=all_Ks[:, current_start:current_end].float(), **kwargs)
+            _, apply_kv, _ = _prepare_apply_fns(viewmats=k_viewmats, Ks=all_Ks.index_select(1, indices).float(), **kwargs)
+            q = _ucpe_transform(apply_q, q)
+            k = _ucpe_transform(apply_kv, k)
+            v = _ucpe_transform(apply_kv, v)
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=False)
+            out = _ucpe_transform(apply_out, out)
+        else:
+            # Preserve the original base-inference dtype/autocast behavior.
+            self.ucpe_prope._precompute_and_cache_apply_fns(viewmats=viewmats, Ks=Ks)
+            q = self.ucpe_prope._apply_to_q(q)
+            k = self.ucpe_prope._apply_to_kv(k)
+            v = self.ucpe_prope._apply_to_kv(v)
+            if kv_cache is not None:
+                k, v = _ucpe_cache_attend(kv_cache, kv_cache_start, k, v)
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=False)
+            out = self.ucpe_prope._apply_to_o(out)
+        out = out.to(dtype=self.ucpe_out_proj.weight.dtype)
+        return self.ucpe_out_proj(out.transpose(1, 2).reshape(batch, seq_len, heads * head_dim))
 
     def get_ada_values(
         self, scale_shift_table: torch.Tensor, batch_size: int, timestep: torch.Tensor, indices: slice
@@ -228,6 +327,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
         prompt_timestep: torch.Tensor | None,
         context_mask: torch.Tensor | None,
         cross_attention_adaln: bool = False,
+        crossattn_cache: dict | None = None,
     ) -> torch.Tensor:
         """Apply text cross-attention, with optional AdaLN modulation."""
         if cross_attention_adaln:
@@ -243,14 +343,23 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 prompt_timestep,
                 context_mask,
                 self.norm_eps,
+                crossattn_cache,
             )
-        return attn(rms_norm(x, eps=self.norm_eps), context=context, mask=context_mask)
+        return attn(
+            rms_norm(x, eps=self.norm_eps), context=context, mask=context_mask,
+            crossattn_cache=crossattn_cache,
+        )
 
     def forward(  # noqa: PLR0915
         self,
         video: TransformerArgs | None,
         audio: TransformerArgs | None,
         perturbations: BatchedPerturbationConfig | None = None,
+        ucpe_viewmats: torch.Tensor | None = None,
+        ucpe_Ks: torch.Tensor | None = None,
+        kv_cache: dict | None = None,
+        current_video_token_start: int = 0,
+        current_audio_token_start: int = 0,
     ) -> tuple[TransformerArgs | None, TransformerArgs | None]:
         if video is None and audio is None:
             raise ValueError("At least one of video or audio must be provided")
@@ -283,18 +392,23 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 if not all_perturbed and not none_perturbed
                 else None
             )
-            vx = (
-                vx
-                + self.attn1(
+            attn_out = self.attn1(
                     norm_vx,
                     pe=video.positional_embeddings,
                     mask=video.self_attention_mask,
                     perturbation_mask=v_mask,
                     all_perturbed=all_perturbed,
-                )
-                * vgate_msa
+                    kv_cache=kv_cache.get("video_self") if kv_cache else None,
+                    kv_cache_start=current_video_token_start,
             )
-            del vgate_msa, norm_vx, v_mask
+            if self.action_ucpe_enabled and ucpe_viewmats is not None and ucpe_Ks is not None:
+                attn_out = attn_out + self._apply_ucpe_attention(
+                    norm_vx, ucpe_viewmats, ucpe_Ks,
+                    kv_cache=kv_cache.get("video_ucpe") if kv_cache else None,
+                    kv_cache_start=current_video_token_start,
+                )
+            vx = vx + attn_out * vgate_msa
+            del vgate_msa, norm_vx, v_mask, attn_out
             vx = vx + self._apply_text_cross_attention(
                 vx,
                 video.context,
@@ -305,6 +419,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 video.prompt_timestep,
                 video.context_mask,
                 cross_attention_adaln=self.cross_attention_adaln,
+                crossattn_cache=kv_cache.get("video_text") if kv_cache else None,
             )
 
         if run_ax:
@@ -332,6 +447,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                     mask=audio_self_attention_mask,
                     perturbation_mask=a_mask,
                     all_perturbed=all_perturbed,
+                    kv_cache=kv_cache.get("audio_self") if kv_cache else None,
+                    kv_cache_start=current_audio_token_start,
                 )
                 * agate_msa
             )
@@ -346,6 +463,7 @@ class BasicAVTransformerBlock(torch.nn.Module):
                 audio.prompt_timestep,
                 audio.context_mask,
                 cross_attention_adaln=self.cross_attention_adaln,
+                crossattn_cache=kv_cache.get("audio_text") if kv_cache else None,
             )
 
         # Audio - Video cross attention.
@@ -389,6 +507,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                         mask=cross_attention_mask,
                         pe=video.cross_positional_embeddings,
                         k_pe=audio.cross_positional_embeddings,
+                        kv_cache=kv_cache.get("a2v") if kv_cache else None,
+                        kv_cache_start=current_audio_token_start,
                     )
                     * gate_out_a2v
                     * a2v_mask
@@ -431,6 +551,8 @@ class BasicAVTransformerBlock(torch.nn.Module):
                         mask=cross_attention_mask,
                         pe=audio.cross_positional_embeddings,
                         k_pe=video.cross_positional_embeddings,
+                        kv_cache=kv_cache.get("v2a") if kv_cache else None,
+                        kv_cache_start=current_video_token_start,
                     )
                     * gate_out_v2a
                     * v2a_mask
@@ -476,6 +598,7 @@ def apply_cross_attention_adaln(
     prompt_timestep: torch.Tensor,
     context_mask: torch.Tensor | None = None,
     norm_eps: float = 1e-6,
+    crossattn_cache: dict | None = None,
 ) -> torch.Tensor:
     batch_size = x.shape[0]
     shift_kv, scale_kv = (
@@ -484,4 +607,9 @@ def apply_cross_attention_adaln(
     ).unbind(dim=2)
     attn_input = rms_norm(x, eps=norm_eps) * (1 + q_scale) + q_shift
     encoder_hidden_states = context * (1 + scale_kv) + shift_kv
-    return attn(attn_input, context=encoder_hidden_states, mask=context_mask) * q_gate
+    return attn(
+        attn_input,
+        context=encoder_hidden_states,
+        mask=context_mask,
+        crossattn_cache=crossattn_cache,
+    ) * q_gate

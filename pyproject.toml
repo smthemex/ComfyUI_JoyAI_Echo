@@ -1,7 +1,7 @@
 [project]
 name = "joyai_echo"
-description = "just 5G VRAM, you can infer 5 min long video,Pushing the Frontier of Long Video Generation Standalone"
-version = "1.0.0"
+description = "Low VRAM, you can infer 5 min long video,or wm video ,Pushing the Frontier of Long Video Generation Standalone"
+version = "1.5.0"
 license = {file = "LICENSE"}
 dependencies = ["torch", "torchvision", "torchaudio", "triton", "transformers", "safetensors", "numpy", "scipy", "einops", "Pillow", "tqdm", "av", "diffusers", "gguf", "soundfile"]
 

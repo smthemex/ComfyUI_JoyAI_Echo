@@ -22,6 +22,8 @@ from ...ltx_core.model.transformer import (
     LTXModelConfigurator,
     X0Model,
 )
+from ...ltx_core.model.transformer.model_ import X0Model as X0Model_,LTXModel as LTXModel_
+from ...ltx_core.model.transformer.model_configurator_ import LTXModelConfigurator as LTXModelConfigurator_,LTXV_MODEL_COMFY_RENAMING_MAP as LTXV_MODEL_COMFY_RENAMING_MAP_
 from ...ltx_core.model.upsampler import LatentUpsampler, LatentUpsamplerConfigurator
 from ...ltx_core.model.video_vae import (
     VAE_DECODER_COMFY_KEYS_FILTER,
@@ -44,6 +46,9 @@ from ...ltx_core.text_encoders.gemma import (
 )
 from ...ltx_core.utils import find_matching_file
 
+def _enable_action_module(module: torch.nn.Module, action_config) -> torch.nn.Module:
+    module.enable_action_conditioning(action_config)
+    return module
 
 class ModelLedger:
     """
@@ -106,7 +111,8 @@ class ModelLedger:
         gguf_dit: bool = False,
         load_model: str = "dit",
         clip_path="",
-        origin_vae=True
+        origin_vae=True,
+        action_config=None
     ):
         self.dtype = dtype
         self.device = device
@@ -120,6 +126,7 @@ class ModelLedger:
         self.load_model = load_model
         self.clip_path = clip_path
         self.origin_vae = origin_vae
+        self.action_config=action_config
         if self.load_model == "clip":
             self.build_model_builders_clip()
             self.build_model_builders_embeddings()
@@ -218,8 +225,8 @@ class ModelLedger:
             
             self.transformer_builder = Builder(
                 model_path=self.checkpoint_path,
-                model_class_configurator=LTXModelConfigurator,
-                model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP,
+                model_class_configurator=LTXModelConfigurator if self.action_config is None else LTXModelConfigurator_,
+                model_sd_ops=LTXV_MODEL_COMFY_RENAMING_MAP if self.action_config is None else LTXV_MODEL_COMFY_RENAMING_MAP_,
                 loras=tuple(self.loras),
                 registry=self.registry,
                 load_model= self.load_model,
@@ -317,30 +324,52 @@ class ModelLedger:
             quantization=self.quantization,
         )
 
-    def transformer(self) -> X0Model:
+    def transformer(self,action_config=None) -> X0Model:
         if not hasattr(self, "transformer_builder"):
             raise ValueError(
                 "Transformer not initialized. Please provide a checkpoint path to the ModelLedger constructor."
             )
 
+        builder = self.transformer_builder
+        action_mode=False
+        if action_config is not None:
+            #from ...ltx_core.model.transformer.model_ import LTXModel as LTXModel_,X0Model as X0Model_
+            from ...ltx_core.loader.module_ops import ModuleOps
+            action_op = ModuleOps(
+                name="enable_pure_ucpe",
+                matcher=lambda module: isinstance(module, LTXModel_),
+                mutator=lambda module: _enable_action_module(module, action_config),
+            )
+            builder = replace(builder, module_ops=(*builder.module_ops, action_op))
+            action_mode=True
+
         if self.quantization is None:
             if self.gguf_dit:
-                return X0Model(self.transformer_builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit)).eval()
+                if action_mode:
+                    return X0Model_(builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit)).eval()
+                else:
+                    return X0Model(builder.build(device=self._target_device(), dtype=self.dtype,gguf_dit=self.gguf_dit)).eval()
             else:
-                return X0Model(self.transformer_builder.build_(device=self._target_device(), dtype=self.dtype)).to(self.device).eval()
+                if action_mode:
+                    return X0Model_(builder.build_(device=torch.device("cpu"), dtype=self.dtype)).eval()
+                else: 
+                    return X0Model(builder.build_(device=self._target_device(), dtype=self.dtype)).to(self.device).eval()
         else:
-            sd_ops = self.transformer_builder.model_sd_ops
+            sd_ops = builder.model_sd_ops
             if self.quantization.sd_ops is not None:
                 sd_ops = SDOps(
                     name=f"sd_ops_chain_{sd_ops.name}+{self.quantization.sd_ops.name}",
                     mapping=(*sd_ops.mapping, *self.quantization.sd_ops.mapping),
                 )
             builder = replace(
-                self.transformer_builder,
-                module_ops=(*self.transformer_builder.module_ops, *self.quantization.module_ops),
+                builder,
+                module_ops=(*builder.module_ops, *self.quantization.module_ops),
                 model_sd_ops=sd_ops,
             )
-            return X0Model(builder.build_(device=self._target_device())).to(self.device).eval()
+            if action_mode:
+                return X0Model_(builder.build_(device=self._target_device())).to(self.device).eval()
+            else:
+                return X0Model(builder.build_(device=self._target_device())).to(self.device).eval()
 
     def video_decoder(self) -> VideoDecoder:
         if not hasattr(self, "vae_decoder_builder"):
