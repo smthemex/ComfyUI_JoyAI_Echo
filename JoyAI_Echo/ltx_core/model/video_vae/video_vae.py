@@ -962,6 +962,31 @@ class VideoDecoder(nn.Module):
 
         return weights
 
+def decode_video_to_fhwc(
+    latent: torch.Tensor,
+    video_decoder: VideoDecoder,
+    tiling_config: TilingConfig | None = None,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """
+    Decode a video latent tensor and return a single [F, H, W, C] uint8 tensor.
+    Args:
+        latent: Tensor [c, f, h, w]
+        video_decoder: Decoder module.
+        tiling_config: Optional tiling settings.
+        generator: Optional random generator for deterministic decoding.
+    Returns:
+        Decoded video tensor [F, H, W, C], uint8 in [0, 255].
+    """
+    video_chunk_generator = decode_video(
+        latent=latent,
+        video_decoder=video_decoder,
+        tiling_config=tiling_config,
+        generator=generator,
+    )
+    # Exhaust the generator to get all [f, h, w, c] chunks and concatenate along the frame dimension (dim=0)
+    return torch.cat(list(video_chunk_generator), dim=0)
+
 
 def decode_video(
     latent: torch.Tensor,

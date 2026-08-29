@@ -83,6 +83,7 @@ class SafetensorsModelStateDictLoader(StateDictLoader):
         self.weight_loader = weight_loader if weight_loader is not None else SafetensorsStateDictLoader()
 
     def metadata(self, path: str,load_model) -> dict:
+       
         if load_model in ["spatial"]:
             with safetensors.safe_open(path, framework="pt") as f:
                 md = json.loads(f.metadata()["config"])       
@@ -96,8 +97,6 @@ class SafetensorsModelStateDictLoader(StateDictLoader):
         else:
             return json.loads(ORIGINAL_CONFIG_JSON)
         
-
-
 
     def load(self, path: str | list[str], sd_ops: SDOps | None = None, device: torch.device | None = None) -> StateDict:
         return self.weight_loader.load(path, sd_ops, device)
