@@ -9,7 +9,7 @@ import sys
 import folder_paths
 from comfy_api.latest import  io
 import nodes
-import math
+
 from pathlib import PureWindowsPath
 import argparse
 from .JoyAI_Echo.inference import load_joyai_te,infer_joyai_text,load_joyai_engine,infer_joyai_video
@@ -260,7 +260,7 @@ class JoyAI_Echo_SM_KSampler(io.ComfyNode):
         cli_overrides = {"video_width": width,"video_height": height,"seed": seed,"num_frames": num_frames,"video_fps": frame_rate,} # "steps": steps,
 
         # 只有在成功解析出帧数列表时，才传递给 inference
-        shot_frames_list=None or format_shot_num_secs(shot_num_secs) 
+        shot_frames_list=None or format_shot_num_secs(shot_num_secs,frame_rate) 
         if shot_frames_list is not None:
             cli_overrides["shot_num_frames"] = shot_frames_list
 
