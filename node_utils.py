@@ -13,9 +13,11 @@ import soundfile as sf
 import uuid
 import json
 from comfy_api.latest import  Types
+import math
+
 cur_path = os.path.dirname(os.path.abspath(__file__))
 
-def format_shot_num_secs(shot_num_secs):
+def format_shot_num_secs(shot_num_secs,frame_rate):
     # ========== 优化：解析 shot_num_secs，严格去空格并处理无输入情况 ==========
     shot_frames_list = None
     # 防御 shot_num_secs 为 None 的情况，并去除整体首尾空格
