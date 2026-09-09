@@ -38,6 +38,11 @@ from ...ltx_core.model.video_vae import (
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+# If True, LoRAs applied on top of a GGUF checkpoint are added at forward time
+# (the base weights stay quantized as GGUFLinear) instead of being merged into
+# fully dequantized bf16 weights. This keeps VRAM low for the DiT blocks.
+GGUF_LORA_FORWARD_TIME = True
+
 
 
 @dataclass(frozen=True)
@@ -341,9 +346,15 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         g_config = GGUFQuantizationConfig(compute_dtype=dtype or torch.bfloat16)
         hf_quantizer = GGUFQuantizer(quantization_config=g_config)
         hf_quantizer.pre_quantized = True
-        
-        if lora_sd_and_strengths is not None:
-            print("Applying LoRAs to GGUF model")
+
+        # When a LoRA is present we can either (a) dequantize every targeted weight
+        # and bake the LoRA delta into a full-precision tensor (the old behaviour,
+        # which throws away the whole point of a GGUF checkpoint), or (b) keep the
+        # base weights quantized and add the LoRA delta on the fly inside each
+        # Linear's forward. (b) keeps VRAM low and is the default.
+        lazy_lora = bool(GGUF_LORA_FORWARD_TIME and lora_sd_and_strengths)
+        if lora_sd_and_strengths is not None and not lazy_lora:
+            print("Applying LoRAs to GGUF model (merged into dequantized weights)")
             model_state_dict=apply_loras_gguf(model_state_dict, lora_sd_and_strengths, dtype)
 
         hf_quantizer._process_model_before_weight_loading(
@@ -361,6 +372,13 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         )
 
         hf_quantizer._process_model_after_weight_loading(meta_model)
+
+        if lazy_lora:
+            try:
+                _attach_gguf_lora(meta_model, lora_sd_and_strengths, dtype)
+                print("Applying LoRAs to GGUF model (forward-time, base weights stay quantized)")
+            except Exception as e:
+                print(f"Error attaching forward-time LoRAs to GGUF model: {e}")
 
         # 修复：确保 video_args_preprocessor.simple_preprocessor.patchify_proj 引用正确的模块
         if hasattr(meta_model, 'video_args_preprocessor'):
@@ -384,6 +402,77 @@ class SingleGPUModelBuilder(Generic[ModelType], ModelBuilderProtocol[ModelType],
         del model_state_dict
         gc.collect()
         return meta_model.to(dtype=dtype)
+
+def _gguf_lora_forward_hook(module, inputs, output):
+    """Forward hook that adds ``sum_i scale_i * (x @ A_i^T) @ B_i^T`` to a Linear's
+    output. This is mathematically identical to merging ``(B*scale) @ A`` into the
+    weight, but the (quantized) base weight is left untouched so VRAM stays low."""
+    x = inputs[0]
+    dev = output.device
+    acc = None
+    for i in range(module._lora_num):
+        a = getattr(module, f"_lora_A_{i}")
+        b = getattr(module, f"_lora_B_{i}")
+        if a.device != dev:
+            a = a.to(dev)
+        if b.device != dev:
+            b = b.to(dev)
+        scale = module._lora_scales[i]
+        t = torch.nn.functional.linear(x.to(a.dtype), a)   # x @ A^T -> [*, r]
+        t = torch.nn.functional.linear(t, b)               # -> [*, out]
+        if scale != 1.0:
+            t = t * scale
+        acc = t if acc is None else acc + t
+    if acc is not None:
+        output = output + acc.to(output.dtype)
+    return output
+
+
+def _attach_gguf_lora(model, lora_sd_and_strengths, dtype):
+    """Attach LoRA A/B matrices to the matching ``nn.Linear`` modules (kept as
+    GGUFLinear) and register a forward hook that applies the delta at compute
+    time. Small LoRA tensors are registered as non-persistent buffers so they
+    follow the module across ``.to(device)`` moves (block offload/streaming)."""
+    lora_dtype = torch.bfloat16
+
+    wanted = set()
+    for lsd, _ in lora_sd_and_strengths:
+        for k in lsd.sd.keys():
+            if k.endswith(".lora_A.weight"):
+                wanted.add(k[: -len(".lora_A.weight")])
+
+    attached_prefixes = set()
+    attached = 0
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Linear) or name not in wanted:
+            continue
+        key_a = f"{name}.lora_A.weight"
+        key_b = f"{name}.lora_B.weight"
+        pairs = []
+        for lsd, coef in lora_sd_and_strengths:
+            sd = lsd.sd
+            if key_a in sd and key_b in sd:
+                pairs.append((sd[key_a], sd[key_b], float(coef)))
+        if not pairs:
+            continue
+        scales = []
+        for i, (a, b, coef) in enumerate(pairs):
+            module.register_buffer(f"_lora_A_{i}", a.detach().to(dtype=lora_dtype).contiguous(), persistent=False)
+            module.register_buffer(f"_lora_B_{i}", b.detach().to(dtype=lora_dtype).contiguous(), persistent=False)
+            scales.append(coef)
+        module._lora_scales = scales
+        module._lora_num = len(pairs)
+        module.register_forward_hook(_gguf_lora_forward_hook)
+        attached_prefixes.add(name)
+        attached += 1
+
+    missing = wanted - attached_prefixes
+    print(f"[GGUF-LoRA] forward-time LoRA attached to {attached} Linear module(s); "
+          f"{len(missing)} lora target(s) unmatched")
+    for m in list(missing)[:10]:
+        print(f"  [GGUF-LoRA] unmatched (skipped, not an nn.Linear or renamed): {m}")
+    return model
+
 
 def adjust_key_name(key):
     from packaging import version
